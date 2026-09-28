@@ -446,7 +446,8 @@ function UI.menuBottom(kind, rows)
   elseif kind == "moves" then return 80
   elseif kind == "info" then return 83
   elseif kind == "yesno" then return 71
-  elseif kind == "switch" then return (rows or 1) > 1 and 130 or 77
+  elseif kind == "switch" then return (rows or 1) > 1 and 132 or 86
+  elseif kind == "switchstatus" then return 117
   elseif kind == "pack" then return 89
   elseif kind == "stats" then return 101 end -- up to five rows (Gen 2)
   return 0
@@ -455,6 +456,7 @@ end
 -- Rightmost stage column each menu uses (the stats card is narrow).
 function UI.menuRight(kind)
   if kind == "stats" then return UI.STATS.x + UI.STATS.w + 5 end
+  if kind == "switchstatus" then return UI.SWITCH_STATUS.x + UI.SWITCH_STATUS.w + 4 end
   return UI.MENU_RIGHT
 end
 
@@ -768,14 +770,25 @@ UI.SWITCH_BUTTONS = { "CLEFT", "CUP", "CRIGHT" }
 
 -- singleRow: only the row the C buttons address, in the first row's place
 -- (the engine scene keeps the battlefield clear of a second row).
-function UI.switchCards(members, selected, cRow, singleRow)
-  cRow = cRow or 1
-  local rows = math.max(1, math.ceil(#members / 3))
-  local first, last = 0, rows - 1
-  if singleRow then first, last = cRow - 1, cRow - 1 end
-  for row = first, last do
-    local y = 19 + (singleRow and 0 or row * 53)
-    UI.card(94, y, 201, 46, UI.TINT.player.card)
+-- Switch screen (US asm fragment79_3ADCA0 func_8414216C / init
+-- func_84146610, func_841466B0; data D_84186CD4..CEC): parties of three are
+-- element 0xB, one row in a 207x52 frame (body 201x46); parties of four to
+-- six are element 0xC, two rows 46 apart in one 207x98 frame (body 201x92).
+-- Columns 67 apart. The button that switches to each member, from the input
+-- handlers (stadium_menu.lua): C-left, C-up, C-right; with more than three,
+-- B, C-left, C-up over A, C-down, C-right.
+UI.SWITCH_PICK_THREE = { "CLEFT", "CUP", "CRIGHT" }
+UI.SWITCH_PICK_SIX = { "B", "CLEFT", "CUP", "A", "CDOWN", "CRIGHT" }
+UI.SWITCH_ROW = 46
+
+-- cancelSelected: the cursor is on the L CANCEL tab (CURSOR controls).
+function UI.switchCards(members, selected, cancelSelected)
+  local six = #members > 3
+  local rows = six and 2 or 1
+  local picks = six and UI.SWITCH_PICK_SIX or UI.SWITCH_PICK_THREE
+  UI.card(94, 19, 201, rows * UI.SWITCH_ROW, UI.TINT.player.card)
+  for row = 0, rows - 1 do
+    local y = 19 + row * UI.SWITCH_ROW
     -- column dividers (1 px fills at x160/161, x227/228, y+3..y+42): black,
     -- then the card tint (measured on the captured frame)
     for c = 1, 2 do
@@ -804,7 +817,11 @@ function UI.switchCards(members, selected, cRow, singleRow)
         if m.gender == "F" or m.gender == "M" then
           UI.glyph(m.gender == "F" and UI.GLYPH_FEMALE or UI.GLYPH_MALE, x0 + 54, y + 13)
         end
-        if row + 1 == cRow then buttonIcon(UI.SWITCH_BUTTONS[c + 1], x0 + 3, y + 27, UI.C_TINT) end
+        local pick = picks[i]
+        if pick then
+          local isC = pick:sub(1, 1) == "C"
+          buttonIcon(pick, x0 + 3, y + 27, isC and UI.C_TINT or nil)
+        end
         UI.hpBar(x0 + 19, y + 27, m.hp, m.maxHp)
         UI.number(m.hp, x0 + 38, y + 34, 1)
         setColor({ 255, 255, 255 })
@@ -816,7 +833,13 @@ function UI.switchCards(members, selected, cRow, singleRow)
       end
     end
   end
-  UI.hint(4, 94, 19 + (singleRow and 1 or rows) * 53 - 4, 40)
+  -- The game's L CANCEL / R CHECK tabs, under the cards. L CANCEL: back
+  -- (press L, tap it, or move the cursor onto it and press A). R CHECK: hold
+  -- R and hold a member's button for its STATUS card (user request; the
+  -- game's own STATUS used the held D-pad).
+  local tabY = 19 + rows * UI.SWITCH_ROW + 4
+  UI.tab(94, tabY, "L", "CANCEL", UI.SUB_TINT, cancelSelected == true, "cancel")
+  UI.tab(152, tabY, "R", "CHECK", UI.SUB_TINT, false)
 end
 
 -- PACK item list (port addition: Stadium 2 has no bag in battle). One card
@@ -981,7 +1004,9 @@ end
 
 function UI.wrapDescription(text, width, maxLines)
   local lines, line = {}, ""
-  for word in UI.toLatin1((text or ""):gsub("\n", " ")):gmatch("%S+") do
+  -- Gold's text codes: <NEXT> / <LINE> break lines, <PK><MN> is POKeMON
+  text = tostring(text or ""):gsub("<PK><MN>", "POK\195\169MON"):gsub("<%u+>", " ")
+  for word in UI.toLatin1((text:gsub("\n", " "))):gmatch("%S+") do
     local candidate = line == "" and word or (line .. " " .. word)
     if UI.smallWidth(candidate) <= width or line == "" then line = candidate
     else
@@ -1034,6 +1059,74 @@ function UI.moveInfo(move, button)
     for i, line in ipairs(UI.wrapDescription(move.description, 164, 3)) do
       UI.smallText(line, 98, 43 + 12 * (i - 1))
     end
+  end
+end
+
+-- Switch-screen STATUS (hold the D-pad): element 0xD, US asm
+-- func_8413AB2C (shown), init func_84146704 (D_84186D3C..D48: frame x94
+-- y17 161x100, body 155x94). Offsets from the frame, ROM data:
+--   HP label (17,47) D_84186D54/58 (func_841420A4), HP bar (31,47)
+--   D_84186D5C/58 (func_8414216C), HP digits right-aligned at 50 and max at
+--   57 on row 54 (D_84186D68/70/74), status tag (44,36) D_84186D60/64
+--   (func_841427DC), the Pokemon's types (7,69) and (43,69) D_84186D78..7C
+--   and each move's type label at (83, 16 + 23*i) D_84186D80/84 (func_84141D1C);
+--   PP in the same row, right-aligned at 132 with the max from 138
+--   (D_84186D88..90, placement inferred from the values).
+-- The name, level and move names/PP come from the text pass, not decoded
+-- yet: placed in the same rows (the right column's text block starts at
+-- (79,4), D_84186DB8/BC). m = { name, level, gender, status, hp, maxHp,
+-- types = {..}, moves = { {name, type, pp, maxPp} } }.
+UI.SWITCH_STATUS = { x = 94, y = 17, w = 161, h = 100 }
+local function typeLabel(typeName, x, y)
+  local typeIndex = UI.typeIndex(typeName)
+  local label = UI.TYPE_LABEL[typeIndex]
+  local img = label and tex(36, label)
+  if img then
+    setColor(UI.TYPE_COLOR[typeIndex] or UI.TYPE_COLOR[0x12])
+    blit(img, 0, 0, img.w, img.h, x, y, img.w, img.h)
+  end
+end
+
+function UI.switchStatus(m)
+  if not m then return end
+  local f = UI.SWITCH_STATUS
+  local x, y = f.x, f.y
+  UI.card(x + 2, y + 2, f.w - 6, f.h - 6, UI.TINT.player.card)
+  -- left column: name, level, status, HP, types
+  UI.text(UI.toLatin1(m.name or ""), x + 5, y + 4)
+  setColor({ 255, 255, 255 })
+  digitCell(DIGIT_CELL.L, x + 5, y + 36)
+  local level = tostring(math.floor(m.level or 0))
+  for k = 1, #level do digitCell(tonumber(level:sub(k, k)), x + 5 + 6 * k, y + 36) end
+  if m.gender == "F" or m.gender == "M" then
+    UI.glyph(m.gender == "F" and UI.GLYPH_FEMALE or UI.GLYPH_MALE, x + 64, y + 18)
+  end
+  local entry = UI.STATUS_ENTRY[m.status or "OK"] or UI.STATUS_ENTRY.OK
+  local statusTag = tex(35, entry)
+  if statusTag then setColor({ 255, 255, 255 }); blit(statusTag, 0, 0, statusTag.w, statusTag.h, x + 44, y + 36, statusTag.w, statusTag.h) end
+  local hpLabel = tex(32, 6)
+  if hpLabel then setColor({ 255, 255, 255 }); blit(hpLabel, 0, 0, hpLabel.w, hpLabel.h, x + 17, y + 47, hpLabel.w, hpLabel.h) end
+  UI.hpBar(x + 31, y + 47, m.hp, m.maxHp)
+  UI.number(m.hp, x + 50, y + 54, 1)
+  setColor({ 255, 255, 255 })
+  digitCell(DIGIT_CELL["/"], x + 50, y + 54)
+  local mx = tostring(math.max(0, math.floor(m.maxHp or 0)))
+  for k = 1, #mx do digitCell(tonumber(mx:sub(k, k)), x + 57 + 6 * (k - 1), y + 54) end
+  local types = m.types or {}
+  if types[1] then typeLabel(types[1], x + 7, y + 69) end
+  if types[2] and types[2] ~= types[1] then typeLabel(types[2], x + 43, y + 69) end
+  -- right column: four moves, a name over its type label and PP
+  for i, move in ipairs(m.moves or {}) do
+    if i > 4 then break end
+    local ry = y + 16 + 23 * (i - 1)
+    UI.smallText(UI.toLatin1(move.name or ""), x + 83, ry - 11)
+    typeLabel(move.type, x + 83, ry)
+    -- PP: right-aligned at 132, '/' at 132, max from 138 (D_84186D88..90)
+    setColor(UI.PP_TINT)
+    rightDigits(move.pp or 0, x + 132, ry)
+    digitCell(DIGIT_CELL["/"], x + 132, ry)
+    local maxPp = tostring(math.max(0, math.floor(move.maxPp or 0)))
+    for k = 1, #maxPp do digitCell(tonumber(maxPp:sub(k, k)), x + 138 + 6 * (k - 1), ry) end
   end
 end
 

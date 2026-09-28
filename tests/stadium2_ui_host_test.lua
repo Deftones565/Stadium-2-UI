@@ -67,8 +67,10 @@ local bag=setmetatable({kind="bag",title="ITEMS",index=1,scroll=0,cursorRows=3,
   items={{value="POTION",label="POTION",count=3},{value="POKE_BALL",label="POK\195\169 BALL",count=5},
     {value="ANTIDOTE",label="ANTIDOTE",count=1},{value="BIKE",label="BICYCLE"},{cancel=true,label="CANCEL"}}},ListMenu)
 game1.stack.states={b1,bag}; b1.phase="menu"
+bag.hold={enabled=true}
 local packCtx=BattleUI.menuContext()
 ok(packCtx and packCtx.kind=="pack" and BattleUI.hidesState(bag),"Gen 1 bag: Stadium item list, host box hidden")
+ok(bag.hold.enabled==false,"Gen 1 bag: one row per press (no held repeat)")
 ok(BattleUI.bottomVisible(b1)==false,"the host's bottom box stays hidden under the item list")
 packCtx.select(5); ok(bag.index==5 and bag.scroll==2,"row pick drives the host cursor and its 3-row window")
 local pv=a1:packView(packCtx)
@@ -151,6 +153,31 @@ Menu.step(outGame,outCtx,"stadium",function(b) tapped=b end)
 ok(outGame.input.pressQueue[1]=="a" and tapped==nil,"A reaches the refusal box (not withheld, no switch pick)")
 game1.stack.states={b1}; b1.phase="menu"
 
+-- Move info text: Gen 1 has none, so Stadium 2's text for the move number.
+local Descriptions=require("mods.STADIUM2_UI.lib.move_descriptions")
+local count=0 for _ in pairs(Descriptions) do count=count+1 end
+ok(count==251 and Descriptions[89]:find("shaking the ground",1,true),"Stadium 2's text for all 251 moves")
+b1.data=b1.data or {}
+b1.data.moves={EARTHQUAKE={name="EARTHQUAKE",type="GROUND",pp=10,index=89,power=100,accuracy=100}}
+local savedMoves=b1.player.curMoves
+b1.player.curMoves={{id="EARTHQUAKE",pp=10}}
+local gm=a1:moves()
+ok(gm[1].number==89 and gm[1].description==Descriptions[89],"Gen 1 moves carry Stadium 2's description")
+b1.player.curMoves=savedMoves
+local wrapped=UI.wrapDescription("A full-body<NEXT>charge by a <PK><MN>.",1000,3)
+ok(#wrapped==1 and wrapped[1]=="A full-body charge by a POK\233MON.","Gold's <NEXT> and <PK><MN> codes are not printed")
+
+-- The switch screen's STATUS card: each member's types and moves with PP.
+do
+  b1.data.pokemon=b1.data.pokemon or {}
+  b1.data.pokemon.PIKA={name="PIKACHU",types={"ELECTRIC"}}
+  b1.data.moves.THUNDERBOLT={name="THUNDERBOLT",type="ELECTRIC",pp=15}
+  local member={species="PIKA",level=30,hp=50,stats={hp=60},moves={{id="THUNDERBOLT",pp=12,ppUps=1}}}
+  local ms=a1:members({party={member}})
+  ok(ms[1].types[1]=="ELECTRIC" and ms[1].moves[1].name=="THUNDERBOLT" and ms[1].moves[1].pp==12
+    and ms[1].moves[1].maxPp==18,"members carry types and moves (PP with PP Ups) for STATUS")
+end
+
 -- Deferring and disabling -------------------------------------------------
 package.loaded["mods.STADIUM2_IMPORTER.lib.importer"]={stadiumUiEnabled=function() return true end}
 ok(BattleUI.menuContext()==nil and BattleUI.statusVisible(b1)==true,"stands aside for the importer's own Stadium UI")
@@ -202,8 +229,10 @@ function PackMenu2:description() return "Restores HP by<NEXT>20 points." end
 local pack=setmetatable({battle=true,index=1,rows={{id="POTION",name="POTION",count=2,showCount=true},
   {id="TM_01",name="TM01",tmhmLabel="01",teaches="DYNAMICPUNCH",count=1,showCount=true}}},PackMenu2)
 game2.stack.states={screen,pack}; screen.phase="menu"
+pack.hold={enabled=true}
 local pc2=BattleUI.menuContext()
 ok(pc2 and pc2.kind=="pack" and BattleUI.hidesState(pack),"Gen 2 PACK: Stadium item list, host screen hidden")
+ok(pack.hold.enabled==false,"Gen 2 PACK: one row per press (no held repeat)")
 pc2.select(2); ok(pack.index==2 and pack.visible,"row pick drives the PACK cursor")
 pc2.pocket(1); ok(pack.pocketMoved==1,"pocket arrows switch pockets")
 local v2=a2:packView(pc2)
@@ -332,6 +361,7 @@ for _,size in ipairs(sizes) do
     {menu="yesno",engine=true},{menu="moves",engine=true},{menu="switch",rows=1,engine=true},
     {menu="switch",rows=2,engine=true},{menu="pack",refusal=true},{menu="pack",engine=true},
     {menu="stats",engine=true},{menu="stats",refusal=true},
+    {menu="switchstatus",engine=true},{menu="switchstatus"},
     {message=true},{message=true,engine=true}}
   for _,sc2 in ipairs(scenarios) do
     local name=label.." "..(sc2.menu or "message")..(sc2.rows==2 and "x2" or "")..(sc2.engine and " engine" or "")..(sc2.refusal and " refusal" or "")
@@ -359,7 +389,8 @@ for _,size in ipairs(sizes) do
     if sc2.engine and box then ok(box.y>=vp.gameY+96*(gh/144),name..": engine box under the sprite box") end
     -- the card itself is only ever hidden when a two-row switch screen and
     -- a box leave no gap
-    if not sc2.message and not (sc2.rows==2 and box) then
+    -- (and the held STATUS card, as tall as two rows, on small screens)
+    if not sc2.message and not (sc2.rows==2 and box) and not (sc2.menu=="switchstatus" and box) then
       ok(rects.enemy~=nil,name..": opponent's card has room")
     end
   end
@@ -415,8 +446,9 @@ for _,size in ipairs(sizes) do
     local e,p,eClear,pClear=BattleUI.spriteMoves(game,obstacles,0)
     ok(e[2]>=0 and e[2]<=40 and e[1]<=8 and e[1]>=-40,label.." "..kind..": opponent moves down/sideways within limits")
     ok(game.x+(96+e[1]+56)*sc<=game.x+160*sc+0.5,label.." "..kind..": opponent stays on the Game Boy screen")
-    local er={x=game.x+(96+e[1])*sc,y=game.y+e[2]*sc,w=56*sc,h=56*sc}
-    local pr={x=game.x+(8+p[1])*sc,y=game.y+(40+p[2])*sc,w=56*sc,h=56*sc}
+    -- inset half a pixel, as the solver measures (touching an edge is clear)
+    local er={x=game.x+(96+e[1])*sc+.5,y=game.y+e[2]*sc+.5,w=56*sc-1,h=56*sc-1}
+    local pr={x=game.x+(8+p[1])*sc+.5,y=game.y+(40+p[2])*sc+.5,w=56*sc-1,h=56*sc-1}
     if eClear then
       for n,o in pairs(obstacles) do ok(not BattleUI.overlaps(er,o),label.." "..kind..": opponent clear of "..n) end
       -- a sprite with 20 blank rows at the top needs to move no further

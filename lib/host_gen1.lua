@@ -347,6 +347,7 @@ function Gen1:menuContext()
   if party then
     local members = party.party or battle:playerPartyView() or {}
     return { kind = "switch", menu = party, text = refusal, memberCount = #members,
+      current = function() return party.index end,
       select = function(i) if not refusal then party.index = i end end,
       submenuOpen = function() return party.submenu ~= nil end,
       selectSub = function(action)
@@ -360,6 +361,9 @@ function Gen1:menuContext()
   if statBox then return { kind = "stats", menu = statBox } end
   local bag, text = self:packMenu()
   if bag then
+    -- one row per press: no held-key repeat (at high game speed it ran
+    -- through the list faster than an item could be picked)
+    if type(bag.hold) == "table" then bag.hold.enabled = false end
     return { kind = "pack", menu = bag, text = text,
       select = function(i)
         if text or not bag.items[i] then return end
@@ -438,13 +442,35 @@ end
 function Gen1:members(menu)
   local battle = self.battle
   local out = {}
+  local moveDefs = battle.data and battle.data.moves or {}
   for i, mon in ipairs(menu.party or battle:playerPartyView() or {}) do
     local def = battle.data and battle.data.pokemon and battle.data.pokemon[mon.species]
+    -- the switch screen's STATUS card: types and moves with PP
+    local moves = {}
+    for k, move in ipairs(mon.moves or {}) do
+      local mdef = moveDefs[move.id] or {}
+      local basePp = mdef.pp or move.pp or 0
+      moves[k] = { name = mdef.name or tostring(move.id), type = mdef.type, pp = move.pp or 0,
+        maxPp = basePp + (move.ppUps or 0) * math.floor(basePp / 5) }
+    end
     out[i] = { name = mon.nickname or (def and def.name) or "", level = mon.level,
       hp = mon.hp or 0, maxHp = mon.stats and mon.stats.hp or mon.hp or 0,
-      status = UI.statusKey(mon.status, (mon.hp or 0) <= 0) }
+      status = UI.statusKey(mon.status, (mon.hp or 0) <= 0),
+      types = def and def.types or nil, moves = moves }
   end
   return out
+end
+
+-- Gen 1 has no move descriptions: the info card uses Stadium 2's text for
+-- the same move number (lib/move_descriptions.lua).
+local descriptions
+local function stadiumDescription(number)
+  if not number then return nil end
+  if descriptions == nil then
+    local ok, t = pcall(require, ROOT .. ".lib.move_descriptions")
+    descriptions = ok and type(t) == "table" and t or false
+  end
+  return descriptions and descriptions[number] or nil
 end
 
 function Gen1:moves()
@@ -454,9 +480,11 @@ function Gen1:moves()
   for i, move in ipairs(battle.player and battle.player.curMoves or {}) do
     local def = data[move.id] or {}
     local basePp = def.pp or move.pp or 0
+    local number = tonumber(def.index or def.num)
     out[i] = { name = def.name or tostring(move.id), type = def.type, pp = move.pp or 0,
       maxPp = basePp + (move.ppUps or 0) * math.floor(basePp / 5),
-      power = def.power, accuracy = def.accuracy, number = tonumber(def.index or def.num) }
+      power = def.power, accuracy = def.accuracy, number = number,
+      description = def.description or stadiumDescription(number) }
   end
   return out
 end

@@ -135,17 +135,77 @@ function Menu.cEdges(now)
   return edges, from
 end
 
--- input.pointer: remember presses; a press on a Stadium target acts on the
--- next step.
+-- Touch (port addition): a short press on a Stadium target acts when it is
+-- released (the next step); a long press on a Pokemon card shows its STATUS
+-- and on a move its info, and they stay up until the next tap, which only
+-- closes them.
+Menu.LONG_PRESS = .45 -- seconds held (without moving) for a long press
+Menu.DRAG_SLOP = 16   -- window units a press may move and still count
+local presses = {}
+local touchStatus, touchInfo -- member / move slot shown by a long press
+
+function Menu.now()
+  return love and love.timer and love.timer.getTime and love.timer.getTime() or os.clock()
+end
+
 function Menu.pointer(event)
-  if type(event) == "table" and event.phase == "pressed" and event.x and event.y then
-    taps[#taps + 1] = { x = event.x, y = event.y }
+  if type(event) ~= "table" or not (event.x and event.y) then return end
+  local id = event.id or "mouse"
+  if event.phase == "pressed" then
+    presses[id] = { x = event.x, y = event.y, t = Menu.now() }
+  elseif event.phase == "moved" then
+    local p = presses[id]
+    if p and (math.abs(event.x - p.x) > Menu.DRAG_SLOP or math.abs(event.y - p.y) > Menu.DRAG_SLOP) then
+      p.dragged = true
+    end
+  elseif event.phase == "released" then
+    local p = presses[id]
+    presses[id] = nil
+    if p and not p.long and not p.dragged then taps[#taps + 1] = { x = p.x, y = p.y } end
+  elseif event.phase == "cancelled" then
+    presses[id] = nil
   end
 end
 
+-- Presses held long enough become long presses (checked each step).
+local function longPresses()
+  local now, out = Menu.now(), {}
+  for _, p in pairs(presses) do
+    if not p.long and not p.dragged and now - p.t >= Menu.LONG_PRESS then
+      p.long = true
+      out[#out + 1] = p
+    end
+  end
+  return out
+end
+
+function Menu.touchStatus() return touchStatus end
+function Menu.touchInfo() return touchInfo end
+
 local C_SLOT = { CUP = 1, CRIGHT = 2, CDOWN = 3, CLEFT = 4 }
--- Switch screen columns (the icons the game drew): C-left, C-up, C-right.
-local C_MEMBER = { CLEFT = 1, CUP = 2, CRIGHT = 3 }
+-- Switch screen, from the game's own handlers (US asm, fragment79_393CA0):
+--   func_8413B468, parties of three (element 0xB): C-left, C-up, C-right
+--     switch to members 1-3; the held D-pad's left, up, right shows their
+--     status (func_8413AB2C).
+--   func_8413B5D4, parties of four to six (element 0xC): B, C-left, C-up
+--     switch to members 1-3 and A, C-down, C-right to 4-6; the held D-pad's
+--     up/down picks the status row (latched) and left/right the column: up
+--     row left 1, up 2, right 3; down row left 4, down 5, right 6.
+--   Both: R held = CHECK (func_8413A6CC), L = cancel (func_84139958).
+-- The port's STATUS (user request, not the game's D-pad STATUS): hold R and
+-- hold a member's button to see its STATUS card while both are held (CURSOR
+-- controls: hold R for the cursor's member); a long press does it on touch.
+local PICK_THREE = { CLEFT = 1, CUP = 2, CRIGHT = 3 }
+local PICK_SIX = { CLEFT = 2, CUP = 3, CDOWN = 5, CRIGHT = 6 } -- B = 1, A = 4
+local statusMember = nil
+-- CURSOR controls: the cursor on the switch screen's L CANCEL tab (Gen 1's
+-- party list has no CANCEL row of its own; Gen 2's does, at count + 1)
+local cancelFocus = false
+function Menu.cancelFocus() return cancelFocus end
+
+-- The member whose status shows: R held with its button (or the cursor's
+-- member), or a long press's, else nil.
+function Menu.statusMember() return statusMember or touchStatus end
 -- func_8413A53C's D-pad order (up, right, down, left = move 1..4).
 local DPAD_SLOT = { { "up", 1 }, { "right", 2 }, { "down", 3 }, { "left", 4 } }
 
@@ -182,6 +242,7 @@ end
 -- func_8413A53C) or R held on the cursor move (cursor controls).
 function Menu.infoSlot(game, mode, cursor, moveCount)
   moveCount = moveCount or 4
+  if touchInfo and touchInfo <= moveCount then return touchInfo end
   if Menu.stadiumControls(mode) then
     for _, d in ipairs(DPAD_SLOT) do
       if isDown(game, d[1]) and d[2] <= moveCount then return d[2] end
@@ -217,7 +278,25 @@ function Menu.step(game, ctx, mode, tap, cNow)
   local stadium = Menu.stadiumControls(mode)
   local pressedTaps = taps
   taps = {}
-  if not ctx or ctx.kind ~= "switch" then pendingSub = nil; switchRow = 1 end
+  if not ctx or ctx.kind ~= "switch" then
+    pendingSub = nil; switchRow = 1; statusMember = nil; touchStatus = nil
+    cancelFocus = false
+  end
+  if not ctx or ctx.kind ~= "moves" then touchInfo = nil end
+  -- long presses: a Pokemon card's STATUS, a move's info
+  for _, p in ipairs(longPresses()) do
+    local id = UI.hitAt(p.x, p.y)
+    local member = id and tonumber(id:match("^switch:(%d+)$"))
+    local slot = id and tonumber(id:match("^move:(%d+)$"))
+    if member and ctx and ctx.kind == "switch" then touchStatus = member end
+    if slot and ctx and ctx.kind == "moves" then touchInfo = slot end
+  end
+  -- the next tap only closes a card a long press opened
+  if (touchStatus or touchInfo) and #pressedTaps > 0 then
+    touchStatus, touchInfo = nil, nil
+    pressedTaps = {}
+    if ctx then return "dismiss" end
+  end
   if not ctx or type(tap) ~= "function" then return nil end
   local queued = pending(game)
   if ctx.kind == "command" then
@@ -270,19 +349,65 @@ function Menu.step(game, ctx, mode, tap, cNow)
       return nil
     end
     pendingSub = nil
-    if stadium then withhold(game, "a") end
     local count = ctx.memberCount or 0
-    local rows = math.max(1, math.ceil(count / 3))
-    if switchRow > rows then switchRow = 1 end
-    -- C-down moves the C buttons to the next row of three (port adaptation:
-    -- Stadium parties are three, Gen 1/2 parties up to six)
-    if edges.CDOWN and rows > 1 then
-      switchRow = switchRow % rows + 1
-      return "row:" .. switchRow
-    end
+    local six = count > 3
     local member
-    for button, c in pairs(C_MEMBER) do
-      if edges[button] then member = (switchRow - 1) * 3 + c end
+    for button, m in pairs(six and PICK_SIX or PICK_THREE) do
+      if edges[button] then member = m end
+    end
+    statusMember = nil
+    local checking = isDown(game, "r")
+    if stadium then
+      if six then
+        if queued.b then member = 1 end
+        if queued.a then member = 4 end
+        withhold(game, "b")
+      end
+      withhold(game, "a")
+      if checking then
+        -- CHECK: R held with a member's button held shows its STATUS
+        local want
+        for button, m in pairs(six and PICK_SIX or PICK_THREE) do
+          if held[button] then want = m end
+        end
+        if six then
+          if isDown(game, "b") then want = 1 end
+          if isDown(game, "a") then want = 4 end
+        end
+        statusMember = want and want <= count and want or nil
+        member = nil
+      end
+    else
+      if checking then
+        -- CHECK (CURSOR controls): R held shows the cursor's member
+        local at = type(ctx.current) == "function" and ctx.current() or nil
+        statusMember = at and at <= count and at or nil
+        member = nil
+      end
+      -- CURSOR controls: down from the last member moves onto L CANCEL
+      local at = type(ctx.current) == "function" and ctx.current() or nil
+      if cancelFocus then
+        for _, button in ipairs({ "left", "right", "up", "down", "a" }) do withhold(game, button) end
+        if queued.up or queued.left then cancelFocus = false; return "cancel-leave" end
+        if queued.a then cancelFocus = false; tap("b"); return "cancel" end
+        if queued.b then cancelFocus = false end
+        return nil
+      elseif queued.down and at == count and not ctx.hostCancel then
+        withhold(game, "down")
+        cancelFocus = true
+        return "cancel-focus"
+      end
+    end
+    -- L (the L CANCEL tab, or a tap on it): back
+    local cancel = queued.l
+    for _, t in ipairs(pressedTaps) do
+      if UI.hitAt(t.x, t.y) == "cancel" then cancel = true end
+    end
+    if cancel then
+      cancelFocus = false
+      withhold(game, "l")
+      tap("b")
+      return "cancel"
     end
     for _, t in ipairs(pressedTaps) do
       local id = UI.hitAt(t.x, t.y)
@@ -292,18 +417,11 @@ function Menu.step(game, ctx, mode, tap, cNow)
     if member and member <= count then
       ctx.select(member)
       tap("a")
-      -- R (CHECK) held while picking: the host's STATS for that member
-      pendingSub = isDown(game, "r") and "stats" or "battle_switch"
+      pendingSub = "battle_switch"
       return "switch:" .. member
     end
     if not stadium then
-      if queued.r then
-        -- CHECK: the host's STATS for the member under the cursor
-        tap("a")
-        pendingSub = "stats"
-        return "stats"
-      end
-      if queued.a then
+      if queued.a and not checking then
         -- selecting a member switches, as in Stadium; the host's A opens its
         -- submenu this tick and SWITCH is chosen on the next
         pendingSub = "battle_switch"
@@ -389,12 +507,16 @@ function Menu.draw(view)
     UI.commandBar(view.tabs or {}, selected)
   elseif view.kind == "switch" then
     local members = view.members or {}
-    local row = Menu.switchRow(#members)
-    -- one row at a time: the cursor's row with the cursor, else the C row
-    if view.singleRow and not stadium and view.switchIndex then
-      row = math.floor((view.switchIndex - 1) / 3) + 1
+    -- the held D-pad's member (Stadium controls) or a long-pressed card:
+    -- its STATUS card instead
+    local shown = Menu.statusMember()
+    if shown and members[shown] then
+      UI.switchStatus(members[shown])
+      return
     end
-    UI.switchCards(members, not stadium and view.switchIndex or nil, row, view.singleRow)
+    -- the cursor on L CANCEL: the port's (Gen 1) or the host's CANCEL row (Gen 2)
+    local onCancel = not stadium and (cancelFocus or (view.switchIndex or 0) > #members)
+    UI.switchCards(members, not stadium and not onCancel and view.switchIndex or nil, onCancel)
     -- a refusal ("There's no will to fight!") from the hidden host menu
     local message = view.message
     if type(message) == "string" and message ~= "" then
@@ -426,6 +548,9 @@ end
 
 function Menu.reset()
   held, taps, pendingSub, switchRow, device = {}, {}, nil, 1, nil
+  presses, touchStatus, touchInfo = {}, nil, nil
+  cancelFocus = false
+  statusMember = nil
 end
 
 return Menu

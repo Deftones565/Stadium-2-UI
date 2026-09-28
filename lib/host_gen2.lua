@@ -385,6 +385,9 @@ function Gen2:menuContext()
   end
   local pack = self:packMenu()
   if pack then
+    -- one row per press: no held-key repeat (at high game speed it ran
+    -- through the list faster than an item could be picked)
+    if type(pack.hold) == "table" then pack.hold.enabled = false end
     local busy = function() return pack.message or pack.submenu or pack.switching or pack.qtyState or pack.confirm end
     return { kind = "pack", menu = pack,
       select = function(i)
@@ -405,6 +408,9 @@ function Gen2:menuContext()
   local party = self:partyMenu()
   if party then
     return { kind = "switch", menu = party, memberCount = #(party.party or {}),
+      -- Gold's list has its own CANCEL row (one past the last member)
+      hostCancel = true,
+      current = function() return party.index end,
       select = function(i) party.index = i end,
       submenuOpen = function() return party.submenu ~= nil end,
       selectSub = function(action)
@@ -493,12 +499,29 @@ end
 function Gen2:members(menu)
   local screen = self.screen
   local out = {}
+  local data = screen.game and screen.game.data
+  local moveDefs = data and data.moves or {}
+  local okM, Mon = pcall(require, "src.battle.gen2.Mon")
   for i, mon in ipairs(menu.party or {}) do
     local name = call(screen, "name", mon) or mon.nickname or mon.name or ""
+    -- the switch screen's STATUS card: types and moves with PP
+    local types = mon.types
+    if not types and okM and type(Mon) == "table" and Mon.partySpecies then
+      local okS, species = pcall(Mon.partySpecies, mon)
+      local def = okS and data and data.pokemon and data.pokemon[species]
+      types = def and def.types or nil
+    end
+    local moves = {}
+    for k, move in ipairs(not mon.isEgg and mon.moves or {}) do
+      local mdef = moveDefs[move.id] or {}
+      moves[k] = { name = mdef.name or tostring(move.id), type = mdef.type, pp = move.pp or 0,
+        maxPp = move.maxPp or mdef.pp or 0 }
+    end
     out[i] = { name = mon.isEgg and "EGG" or name, level = mon.level, hp = mon.hp or 0,
       maxHp = mon.maxHp or (mon.stats and mon.stats.hp) or mon.hp or 0,
       status = UI.statusKey(mon.status, (mon.hp or 0) <= 0),
-      gender = mon.gender == "male" and "M" or mon.gender == "female" and "F" or nil }
+      gender = mon.gender == "male" and "M" or mon.gender == "female" and "F" or nil,
+      types = not mon.isEgg and types or nil, moves = moves }
   end
   return out
 end

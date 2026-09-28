@@ -152,6 +152,16 @@ end
 
 -- Screen area in window units: the whole window in landscape (as the
 -- importer's widescreen battle), the game frame in portrait.
+-- The menu kind the layout makes room for: the switch screen's held STATUS
+-- card (Stadium controls) is taller than one row of cards.
+function BattleUI.layoutKind(menu)
+  if not menu then return nil end
+  if menu.kind == "switch" and type(Menu.statusMember) == "function" and Menu.statusMember() then
+    return "switchstatus"
+  end
+  return menu.kind
+end
+
 -- The top of the on-screen touch controls in the lower half of a window of
 -- height h (nil when none are shown).
 local TOUCH_CONTROLS = { "dpad", "a", "b", "start", "select" }
@@ -735,7 +745,7 @@ function BattleUI.draw(game, viewport)
     end
     -- the opponent's column moves clear of the menu and of any box
     if panels.enemy and not (owned and not menu) then
-      local dy, compact = BattleUI.enemyOffset(area, menu and menu.kind, rows, boxRect)
+      local dy, compact = BattleUI.enemyOffset(area, menu and BattleUI.layoutKind(menu), rows, boxRect)
       if dy == nil then panels.enemy = nil
       else
         panels.enemy.shiftY, panels.enemy.compact = dy, compact

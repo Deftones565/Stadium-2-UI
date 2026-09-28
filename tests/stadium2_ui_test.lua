@@ -102,13 +102,6 @@ ok(picked==2 and taps[1]=="a","C-up picks member 2 and opens the host submenu")
 reset(); sub=true
 Menu.step(game,switch,"cursor",tap,{})
 ok(subAction=="battle_switch" and taps[1]=="a","the next tick chooses SWITCH")
-reset(); sub=false; subAction=nil
-Menu.step(game,switch,"cursor",tap,{})
-game.input.pressQueue={"r"}
-Menu.step(game,switch,"cursor",tap,{})
-reset(); sub=true; game.input.pressQueue={}
-Menu.step(game,switch,"cursor",tap,{})
-ok(subAction=="stats","R (CHECK) goes to the host's STATS")
 reset(); sub=false; subAction=nil; game.input.pressQueue={"a"}
 Menu.step(game,switch,"cursor",tap,{})
 reset(); sub=true; game.input.pressQueue={}
@@ -145,30 +138,146 @@ ok(Menu.infoSlot(keyGame,"cursor",3,4)==3,"cursor controls: R held shows the cur
 held.r=nil
 ok(Menu.stadiumControls("stadium"),"MENU CONTROLS = STADIUM uses Stadium controls on the keyboard")
 
--- Switch rows (port adaptation for parties of 4..6): C-down moves the C
--- buttons to the next row; R held while picking opens STATS.
+-- Switch screen, from the game's handlers (func_8413B468 / func_8413B5D4):
+-- three members C-left/C-up/C-right; four to six B, C-left, C-up / A,
+-- C-down, C-right; the held D-pad shows a member's STATUS; R held + pick
+-- checks; L cancels.
 Menu.reset(); reset(); sub=false; subAction=nil
 local six={kind="switch",memberCount=6,select=function(i) picked=i end,
   submenuOpen=function() return sub end,
   selectSub=function(action) subAction=action return true end}
+local three={kind="switch",memberCount=3,select=function(i) picked=i end,
+  submenuOpen=function() return sub end,
+  selectSub=function(action) subAction=action return true end}
 local rowGame={input={pressQueue={},sources={},isDown=function(_,b) return held[b]==true end}}
-Menu.step(rowGame,six,"cursor",tap,{})
-ok(Menu.step(rowGame,six,"cursor",tap,{CDOWN=true})=="row:2" and Menu.switchRow(6)==2,"C-down moves to row 2")
-Menu.step(rowGame,six,"cursor",tap,{})
-Menu.step(rowGame,six,"cursor",tap,{CUP=true})
-ok(picked==5,"C-up on row 2 picks member 5")
-reset(); sub=true
-Menu.step(rowGame,six,"cursor",tap,{})
+local function step(ctx,c,queue) rowGame.input.pressQueue=queue or {}; return Menu.step(rowGame,ctx,"stadium",tap,c or {}) end
+step(three); step(three,{CUP=true})
+ok(picked==2,"three: C-up picks member 2")
+reset(); sub=true; step(three)
 ok(subAction=="battle_switch","and switches")
-reset(); sub=false; subAction=nil; held.r=true
-Menu.step(rowGame,six,"cursor",tap,{})
-Menu.step(rowGame,six,"cursor",tap,{CLEFT=true})
-sub=true
-Menu.step(rowGame,six,"cursor",tap,{})
-ok(picked==4 and subAction=="stats","R held + C checks that member")
-held.r=nil
+reset(); sub=false; subAction=nil
+step(six); step(six,{CUP=true})
+ok(picked==3,"six: C-up picks member 3")
+reset(); step(six); step(six,{CDOWN=true})
+ok(picked==5,"six: C-down picks member 5")
+reset(); step(six); step(six,{CRIGHT=true})
+ok(picked==6,"six: C-right picks member 6")
+reset(); picked=nil; step(six,nil,{"b"})
+ok(picked==1 and #rowGame.input.pressQueue==0,"six: B picks member 1 (not the host's back)")
+reset(); picked=nil; step(six,nil,{"a"})
+ok(picked==4,"six: A picks member 4")
+reset(); picked=nil; step(three,nil,{"a"})
+ok(picked==nil,"three: A is not a pick")
+-- CHECK (user request): hold R and hold a member's button for its STATUS
+reset(); picked=nil
+held.r=true
+step(three); step(three,{CUP=true})
+ok(Menu.statusMember()==2 and picked==nil,"three: R + C-up shows member 2's status, no switch")
+step(three,{})
+ok(Menu.statusMember()==nil,"letting go of C-up: the cards again")
+step(six,{CDOWN=true})
+ok(Menu.statusMember()==5,"six: R + C-down shows member 5")
+held.b=true; step(six,{})
+ok(Menu.statusMember()==1 and picked==nil,"six: R + B shows member 1")
+held.b=nil; held.a=true; step(six,{})
+ok(Menu.statusMember()==4 and picked==nil,"six: R + A shows member 4")
+held.a=nil; held.r=nil; step(six,{CDOWN=true})
+ok(Menu.statusMember()==nil,"without R the buttons do not show status")
+held.left=true; step(six)
+ok(Menu.statusMember()==nil,"the D-pad no longer shows status")
+held.left=nil
+-- CURSOR controls: R held shows the cursor's member
+local cur={kind="switch",memberCount=3,current=function() return 3 end,select=function(i) picked=i end,
+  submenuOpen=function() return false end,selectSub=function() return true end}
+held.r=true; rowGame.input.pressQueue={}; Menu.step(rowGame,cur,"cursor",tap,{})
+ok(Menu.statusMember()==3,"CURSOR: R held shows the cursor's member")
+held.r=nil; Menu.step(rowGame,cur,"cursor",tap,{})
+ok(Menu.statusMember()==nil,"and letting go of R closes it")
+-- L: cancel
+reset()
+local tapped={}
+rowGame.input.pressQueue={"l"}
+Menu.step(rowGame,six,"stadium",function(b) tapped[#tapped+1]=b end,{})
+ok(tapped[1]=="b","L cancels the switch screen")
 Menu.step(rowGame,nil,"cursor",tap,{})
-ok(Menu.switchRow(6)==1,"leaving the switch screen resets the row")
+ok(Menu.statusMember()==nil,"leaving the switch screen clears the status view")
+
+-- Touch: a long press shows a card's STATUS / a move's info until the next
+-- tap, which only closes it; a short press still picks (on release).
+do
+  local UIm=require("mods.STADIUM2_UI.lib.stadium_ui")
+  local clock=0
+  local savedNow=Menu.now
+  Menu.now=function() return clock end
+  local savedHit=UIm.hitAt
+  local target="switch:2"
+  UIm.hitAt=function() return target end
+  Menu.reset(); reset(); picked=nil
+  local g2={input={pressQueue={},sources={},isDown=function() return false end}}
+  local ctx={kind="switch",memberCount=6,select=function(i) picked=i end,
+    submenuOpen=function() return false end,selectSub=function() return true end}
+  Menu.pointer({phase="pressed",id=1,x=10,y=10})
+  clock=0.2; Menu.step(g2,ctx,"cursor",tap,{})
+  ok(Menu.statusMember()==nil and picked==nil,"a press shorter than a long press does nothing yet")
+  clock=0.5; Menu.step(g2,ctx,"cursor",tap,{})
+  ok(Menu.statusMember()==2 and picked==nil,"held long: member 2's STATUS, no switch")
+  Menu.pointer({phase="released",id=1,x=10,y=10})
+  Menu.step(g2,ctx,"cursor",tap,{})
+  ok(Menu.statusMember()==2 and picked==nil,"releasing the long press keeps the STATUS up")
+  Menu.pointer({phase="pressed",id=2,x=10,y=10}); Menu.pointer({phase="released",id=2,x=10,y=10})
+  ok(Menu.step(g2,ctx,"cursor",tap,{})=="dismiss" and Menu.statusMember()==nil and picked==nil,
+    "the next tap closes it without switching")
+  Menu.pointer({phase="pressed",id=3,x=10,y=10}); Menu.pointer({phase="released",id=3,x=10,y=10})
+  Menu.step(g2,ctx,"cursor",tap,{})
+  ok(picked==2,"a tap switches, on release")
+  -- moves: the info card
+  target="move:3"; picked=nil
+  local moves={kind="moves",moveCount=4,select=function(i) picked=i end}
+  Menu.pointer({phase="pressed",id=4,x=10,y=10})
+  clock=2; Menu.step(g2,moves,"cursor",tap,{})
+  ok(Menu.infoSlot(g2,"cursor",1,4)==3 and picked==nil,"long press on a move: its info")
+  Menu.pointer({phase="released",id=4,x=10,y=10})
+  Menu.pointer({phase="pressed",id=5,x=10,y=10}); Menu.pointer({phase="released",id=5,x=10,y=10})
+  Menu.step(g2,moves,"cursor",tap,{})
+  ok(Menu.infoSlot(g2,"cursor",1,4)==nil and picked==nil,"a tap closes the move info")
+  -- a drag is neither a tap nor a long press
+  Menu.pointer({phase="pressed",id=6,x=10,y=10}); Menu.pointer({phase="moved",id=6,x=60,y=10})
+  clock=5; Menu.step(g2,moves,"cursor",tap,{})
+  Menu.pointer({phase="released",id=6,x=60,y=10}); Menu.step(g2,moves,"cursor",tap,{})
+  ok(Menu.infoSlot(g2,"cursor",1,4)==nil and picked==nil,"a drag does nothing")
+  Menu.now=savedNow; UIm.hitAt=savedHit; Menu.reset()
+end
+
+-- Going back: the L CANCEL tab (L, a tap on it, or the cursor on it).
+do
+  local UIm=require("mods.STADIUM2_UI.lib.stadium_ui")
+  Menu.reset()
+  local idx=3
+  local g3={input={pressQueue={},sources={},isDown=function() return false end}}
+  local ctx={kind="switch",memberCount=3,current=function() return idx end,select=function(i) idx=i end,
+    submenuOpen=function() return false end,selectSub=function() return true end}
+  local tapped={}
+  local function go(queue,mode) g3.input.pressQueue=queue; tapped={}
+    return Menu.step(g3,ctx,mode or "cursor",function(b) tapped[#tapped+1]=b end,{}) end
+  ok(go({"l"},"stadium")=="cancel" and tapped[1]=="b","Stadium controls: L goes back")
+  ok(go({"l"})=="cancel" and tapped[1]=="b","CURSOR controls: L goes back too")
+  local savedHit=UIm.hitAt
+  UIm.hitAt=function() return "cancel" end
+  Menu.pointer({phase="pressed",id=9,x=1,y=1}); Menu.pointer({phase="released",id=9,x=1,y=1})
+  ok(go({})=="cancel" and tapped[1]=="b","a tap on L CANCEL goes back")
+  UIm.hitAt=savedHit
+  idx=3
+  ok(go({"down"})=="cancel-focus" and Menu.cancelFocus() and #g3.input.pressQueue==0,
+    "CURSOR: down from the last member moves onto L CANCEL")
+  ok(go({"up"})=="cancel-leave" and not Menu.cancelFocus(),"up leaves it")
+  go({"down"})
+  ok(go({"a"})=="cancel" and tapped[1]=="b" and not Menu.cancelFocus(),"A on L CANCEL goes back")
+  idx=2
+  ok(go({"down"})~="cancel-focus" and not Menu.cancelFocus(),"down elsewhere stays the host's")
+  ctx.hostCancel=true; idx=3
+  ok(go({"down"})~="cancel-focus","a host list with its own CANCEL row (Gen 2) keeps down")
+  Menu.reset()
+end
 
 -- YES/NO (UI element 14/15): NO sits left of YES, so left/right pick
 -- directly; A and B stay the host's.
