@@ -152,11 +152,60 @@ end
 
 -- Screen area in window units: the whole window in landscape (as the
 -- importer's widescreen battle), the game frame in portrait.
-local function areaFor(viewport)
+-- The top of the on-screen touch controls in the lower half of a window of
+-- height h (nil when none are shown).
+local TOUCH_CONTROLS = { "dpad", "a", "b", "start", "select" }
+function BattleUI.touchControlsTop(h)
+  local TC = package.loaded["src.core.TouchControls"]
+  if type(TC) ~= "table" or type(TC.visible) ~= "function" or type(TC.layout) ~= "function" then return nil end
+  local okV, visible = pcall(TC.visible, TC)
+  if not (okV and visible) then return nil end
+  local okL, L = pcall(TC.layout, TC)
+  if not (okL and type(L) == "table") then return nil end
+  local top
+  for _, name in ipairs(TOUCH_CONTROLS) do
+    local z = L[name]
+    if type(z) == "table" and tonumber(z.cy) and tonumber(z.w) and z.cy > h / 2 then
+      local y = z.cy - z.w / 2
+      if not top or y < top then top = y end
+    end
+  end
+  return top
+end
+
+-- Screen area in window units: the whole window in landscape (as the
+-- importer's widescreen battle). Portrait: the whole width, from the top of
+-- the window down to the touch controls (never above the Game Boy screen's
+-- bottom), so the cards and menus use the space above the game screen and
+-- the message box the space below it.
+-- safe = {x, y, w, h}: the window's safe rect (notch, status bar), if known.
+function BattleUI.areaFor(viewport, controlsTop, safe)
   local w, h = viewport.width or 0, viewport.height or 0
   if w >= h then return { x = 0, y = 0, w = w, h = h } end
-  return { x = viewport.gameX or 0, y = viewport.gameY or 0,
-    w = viewport.gameWidth or w, h = viewport.gameHeight or h }
+  local left, top, width = 0, 0, w
+  if safe and safe.w and safe.w > 0 and safe.h and safe.h > 0 then
+    left, top, width = safe.x or 0, safe.y or 0, safe.w
+  end
+  local gameBottom = (viewport.gameY or 0) + (viewport.gameHeight or h)
+  local bottom = h
+  if safe and safe.h and safe.h > 0 then bottom = math.min(bottom, (safe.y or 0) + safe.h) end
+  if controlsTop then bottom = math.min(bottom, controlsTop) end
+  bottom = math.max(bottom, math.min(h, gameBottom))
+  return { x = left, y = top, w = width, h = bottom - top }
+end
+
+local function safeRect()
+  local ok, SafeArea = pcall(require, "src.core.SafeArea")
+  if not (ok and type(SafeArea) == "table" and type(SafeArea.windowRect) == "function") then return nil end
+  local okR, x, y, w, h = pcall(SafeArea.windowRect)
+  if not (okR and tonumber(x) and tonumber(y) and tonumber(w) and tonumber(h)) then return nil end
+  return { x = x, y = y, w = w, h = h }
+end
+
+local function areaFor(viewport)
+  local w, h = viewport.width or 0, viewport.height or 0
+  if w >= h then return BattleUI.areaFor(viewport) end
+  return BattleUI.areaFor(viewport, BattleUI.touchControlsTop(h), safeRect())
 end
 
 -- The importer's 3D battle is on screen (its models stand in the arena).
@@ -377,10 +426,13 @@ local PLAYER_MOVES = candidates({ 0, BattleUI.MAX_RIGHT, 2 }, { 0, -BattleUI.MAX
 -- into the Game Boy text area (to the screen's last row)
 local PLAYER_MOVES_NO_BOX = candidates({ 0, BattleUI.MAX_RIGHT, 2 }, { 144 - 96, -BattleUI.MAX_MOVE, -2 })
 
+-- Inset half a window pixel: a box that only touches the UI's edge (the
+-- player's box ending on row 96, the engine box starting there) is clear;
+-- rounding must not move it (a moved copy leaves the pic's last rows behind).
 local function boxRect(g, box, dx, dy, top)
   local y0 = box[2] + (top or 0)
-  return { x = g.x + (box[1] + dx) * g.s, y = g.y + (y0 + dy) * g.s,
-    w = box[3] * g.s, h = (box[2] + box[4] - y0) * g.s }
+  return { x = g.x + (box[1] + dx) * g.s + .5, y = g.y + (y0 + dy) * g.s + .5,
+    w = box[3] * g.s - 1, h = (box[2] + box[4] - y0) * g.s - 1 }
 end
 
 -- The moves (Game Boy pixels) that keep each box clear of `obstacles`.

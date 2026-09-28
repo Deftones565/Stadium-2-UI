@@ -1,7 +1,7 @@
 -- Evict this mod's modules cached by a previous version (see
 -- lib/cache_guard.lua). MOD_BUILD must match manifest.json's version
 -- (stadium2_ui_host_test).
-local MOD_BUILD = "1.0.2"
+local MOD_BUILD = "1.0.3"
 require("mods.STADIUM2_UI.lib.cache_guard").refresh(MOD_BUILD)
 
 local Embed = require("mods.STADIUM2_UI.lib.embed")
