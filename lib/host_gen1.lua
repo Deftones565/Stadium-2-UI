@@ -159,8 +159,21 @@ function Gen1:partyMenu()
   if not top then return nil end
   local ok, PartyMenu = pcall(require, "src.ui.PartyMenu")
   if not ok or getmetatable(top) ~= PartyMenu then return nil end
-  if top.battle ~= battle or top.itemUse or top.tmhm or top.evoStone or top.pickOnly then return nil end
+  -- item use and plain picks drive the same cards (TM/HM and evolution
+  -- stones keep the host's ABLE / NOT ABLE list)
+  if top.battle ~= battle or top.tmhm or top.evoStone then return nil end
   return top
+end
+
+-- The party menu's own prompt ("Use item on which POKeMON?", ...).
+function Gen1:partyPrompt(menu)
+  if type(menu.bottomMessage) ~= "function" then return nil end
+  local ok, text = pcall(menu.bottomMessage, menu)
+  return ok and type(text) == "string" and text ~= "" and text or nil
+end
+
+function Gen1:partyItemUse(menu)
+  return menu ~= nil and menu.itemUse == true
 end
 
 -- The host's battle YES/NO with the default labels.
@@ -231,6 +244,13 @@ function Gen1:messageLines()
   self.lastLines = out
   return out
 end
+
+-- Where each side's picture sits on the 160x144 screen {x, y, w, h}: the
+-- opponent's 7x7 slot at tile (12,0); the player's back pic is drawn 2x at
+-- x = 8 - its left padding, standing on row 96 (backPlacement), so its box
+-- runs from the left edge up to row 32.
+Gen1.SPRITE_BOXES = { enemy = { 96, 0, 56, 56 }, player = { 0, 32, 72, 64 } }
+function Gen1:spriteBoxes() return Gen1.SPRITE_BOXES end
 
 -- The picture in the opponent's 7x7 slot (the trainer's during the intro).
 function Gen1:enemyImage()

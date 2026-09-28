@@ -26,11 +26,13 @@ menus, and moves the opponent's panel out of the way of menus and message
 boxes (leaving out its portrait and balls, or for a moment the whole panel,
 only when there is no room), so nothing overlaps or leaves the screen.
 
-In the game's own (unmodded) battle scene the mod also moves the Game Boy
-battlefield: the Stadium menus keep the top, a two-line message box sits at
-the bottom, and the battlefield with both Pokemon is drawn in the space
-between, as large as fits, so the UI never covers a Pokemon. The host's
-WIDE battle layout and the "world" battle background are left as they are.
+In the game's own (unmodded) battle scene the Game Boy screen stays full
+size, and a Pokemon's sprite box that would touch the UI is moved just far
+enough to clear it (the opponent's down, yours right), gliding when menus
+open and close. When space is tight the status cards leave out their
+portrait and party balls for that moment, and as a last resort the prompt
+box steps aside. The host's WIDE battle layout and the "world" battle
+background are left as they are.
 
 ## Options
 
@@ -54,6 +56,19 @@ menus through the host's own menu state.
 
 The layout, colours and menu behaviour come from the research in
 STADIUM2_IMPORTER (`docs/luna/research/stadium2-battle-ui.md`).
+
+## Credits
+
+The Stadium 2 UI research behind this mod builds on the work of these
+decompilation projects:
+
+- [pret/pokestadiumgs](https://github.com/pret/pokestadiumgs) — the original
+  Pokemon Stadium 2 decompilation and its contributors.
+- [michiiik/pokestadiumgs](https://github.com/michiiik/pokestadiumgs) — the
+  continued decompilation work, including the battle UI routines used as
+  references for this recreation.
+
+Thank you to the maintainers and contributors of both projects.
 
 ## Tests
 

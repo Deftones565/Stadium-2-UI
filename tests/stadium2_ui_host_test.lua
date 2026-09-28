@@ -127,6 +127,18 @@ b1.phase="moveSelect"
 ok(BattleUI.prompt(a1,BattleUI.menuContext())[1]=="Which move will PIKACHU use?","move prompt")
 game1.stack.states={b1,party}
 ok(BattleUI.prompt(a1,BattleUI.menuContext())[1]=="Choose a POK\195\169MON.","switch prompt")
+local itemParty=setmetatable({battle=b1,party={mon,mon},index=1,itemUse=true,
+  bottomMessage=function() return "Use item on which\nPOK\195\169MON?" end},PartyMenu)
+game1.stack.states={b1,itemParty}
+local itemCtx=BattleUI.menuContext()
+ok(itemCtx and itemCtx.kind=="switch" and BattleUI.hidesState(itemParty),"item use: Stadium cards, host list hidden")
+local itemLines=BattleUI.prompt(a1,itemCtx)
+ok(itemLines[1]=="Use item on which" and itemLines[2]=="POK\195\169MON?","item use shows the host's own prompt")
+ok(a1:partyItemUse(itemParty)==true and a1:partyItemUse(party)==false,"item use is told apart from a switch")
+itemParty.tmhm=true
+ok((BattleUI.menuContext() or {}).kind~="switch","TM/HM keeps the host's ABLE list")
+local Gen2Host=require("mods.STADIUM2_UI.lib.host_gen2")
+ok(Gen2Host.partyPrompt(nil,{prompt="Use on which <PK><MN>?"})=="Use on which POK\195\169MON?","Gen 2 prompt spells out <PK><MN>")
 game1.stack.states={b1,choice}; b1.phase="messages"
 b1.visibleText=function() return {"Will you switch","POKeMON?"} end
 ok(BattleUI.prompt(a1,BattleUI.menuContext())[1]=="Will you switch","YES/NO shows its question")
@@ -235,7 +247,8 @@ for _,size in ipairs(sizes) do
     local obstacles={menu=BattleUI.menuRect(area,kind,1),
       player={x=place.left+21*k,y=place.top+15*k,w=75*k,h=112*k}}
     local e,p,eClear,pClear=BattleUI.spriteMoves(game,obstacles,0)
-    ok(e[2]>=0 and e[2]<=40 and e[1]<=0 and e[1]>=-40,label.." "..kind..": opponent moves down/left within 40")
+    ok(e[2]>=0 and e[2]<=40 and e[1]<=8 and e[1]>=-40,label.." "..kind..": opponent moves down/sideways within limits")
+    ok(game.x+(96+e[1]+56)*sc<=game.x+160*sc+0.5,label.." "..kind..": opponent stays on the Game Boy screen")
     local er={x=game.x+(96+e[1])*sc,y=game.y+e[2]*sc,w=56*sc,h=56*sc}
     local pr={x=game.x+(8+p[1])*sc,y=game.y+(40+p[2])*sc,w=56*sc,h=56*sc}
     if eClear then
@@ -254,11 +267,33 @@ for _,size in ipairs(sizes) do
       ok(e3Clear and p3Clear,label.." "..kind..": clear once the prompt steps aside")
       local e3r={x=game.x+(96+e3[1])*sc,y=game.y+e3[2]*sc,w=56*sc,h=56*sc}
       ok(e3r.y+e3r.h<=game.y+144*sc+0.5,label.." "..kind..": still on the Game Boy screen")
+      ok(game.y+(40+p3[2]+56)*sc<=game.y+144*sc+0.5,label.." "..kind..": player's box still on the screen")
     end
   end
   local e0,p0=BattleUI.spriteMoves(game,{},0)
   ok(e0[1]==0 and e0[2]==0 and p0[1]==0 and p0[2]==0,label..": nothing in the way, nothing moves")
 end
+-- Gen 1's real boxes (the 2x back pic reaches x 0..72, rows 32..96): a
+-- moved box never leaves part of the sprite behind or touches the UI.
+do
+  local Gen1=require("mods.STADIUM2_UI.lib.host_gen1")
+  for _,size in ipairs(sizes) do
+    local W,H=size[1],size[2]
+    local area={x=0,y=0,w=W,h=H}
+    local sc=math.min(H/144,W/160)
+    local game={x=(W-160*sc)/2,y=(H-144*sc)/2,s=sc,enemyBox=Gen1.SPRITE_BOXES.enemy,playerBox=Gen1.SPRITE_BOXES.player}
+    local place=UI.placement(area); local k=place.scale
+    for _,kind in ipairs({"command","moves"}) do
+      local obstacles={menu=BattleUI.menuRect(area,kind,1),player={x=place.left+21*k,y=place.top+15*k,w=75*k,h=112*k}}
+      local e,p,ec,pc=BattleUI.spriteMoves(game,obstacles,0)
+      local pb=game.playerBox
+      local pr={x=game.x+(pb[1]+p[1])*sc,y=game.y+(pb[2]+p[2])*sc,w=pb[3]*sc,h=pb[4]*sc}
+      if pc then for n,o in pairs(obstacles) do ok(not BattleUI.overlaps(pr,o),W.."x"..H.." gen1 "..kind..": player's whole back pic clear of "..n) end end
+      ok(pr.x>=game.x-0.5 and pr.x+pr.w<=game.x+160*sc+0.5,W.."x"..H.." gen1 "..kind..": back pic stays on the Game Boy screen")
+    end
+  end
+end
+
 do -- 16:9: the command bar alone moves the opponent a little, not to the bottom
   local sc=7.5; local game={x=(1920-1200)/2,y=0,s=sc}
   local e=BattleUI.spriteMoves(game,{menu=BattleUI.menuRect({x=0,y=0,w=1920,h=1080},"command",1)},0)

@@ -169,6 +169,35 @@ function Gen2:partyMenu()
   return top
 end
 
+-- The party menu's own prompt ("Use on which POKeMON?", ...), with Gold's
+-- <PK><MN> glyph pair spelled out.
+function Gen2:partyPrompt(menu)
+  if not menu then return nil end
+  -- the prompt PartyMenu:draw prints (item_effects.asm:2016)
+  local okM, PartyMenu = pcall(require, "src.ui.gen2.PartyMenu")
+  local prompts = okM and type(PartyMenu) == "table" and PartyMenu.PROMPTS or {}
+  local text, builtin = menu.prompt, menu.promptIsBuiltin
+  if menu.switchFrom and prompts.moveTo then text, builtin = prompts.moveTo, true
+  elseif menu.softboiledFrom and prompts.useItem then text, builtin = prompts.useItem, true end
+  if builtin and type(text) == "string" then
+    local okS, Strings = pcall(require, "src.core.Strings")
+    if okS and Strings then
+      local okT, shown = pcall(Strings, text)
+      if okT and type(shown) == "string" then text = shown end
+    end
+  end
+  if type(text) ~= "string" or text == "" then return nil end
+  return (text:gsub("<PK><MN>", "POK\195\169MON"))
+end
+
+function Gen2:partyItemUse(menu)
+  if not menu then return false end
+  if menu.softboiledFrom then return true end
+  local okM, PartyMenu = pcall(require, "src.ui.gen2.PartyMenu")
+  local prompts = okM and type(PartyMenu) == "table" and PartyMenu.PROMPTS
+  return prompts ~= nil and prompts.useItem ~= nil and menu.prompt == prompts.useItem
+end
+
 function Gen2:onTop()
   local states = self.screen.game and self.screen.game.stack and self.screen.game.stack.states
   return states ~= nil and states[#states] == self.screen
@@ -240,6 +269,12 @@ function Gen2:track()
 end
 
 function Gen2:messageSide() return self.side or "player" end
+
+-- Where each side's picture sits on the 160x144 screen {x, y, w, h}: the
+-- opponent's 7x7 frontpic box at tile (12,0), the player's 6x6 backpic box
+-- at tile (2,6) (with a little room for scaled pics).
+Gen2.SPRITE_BOXES = { enemy = { 96, 0, 56, 56 }, player = { 8, 40, 64, 56 } }
+function Gen2:spriteBoxes() return Gen2.SPRITE_BOXES end
 
 -- The picture in the opponent's 7x7 slot (the trainer's during the intro).
 function Gen2:enemyImage()

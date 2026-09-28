@@ -214,6 +214,13 @@ function BattleUI.prompt(a, menu)
   elseif menu.kind == "moves" then
     return { name and ("Which move will " .. name .. " use?") or "Which move?" }
   elseif menu.kind == "switch" then
+    -- the host party menu's own prompt (item use, forced switch, ...)
+    local okP, text = pcall(a.partyPrompt, a, menu.menu)
+    if okP and text then
+      local lines = {}
+      for line in text:gmatch("[^\n]+") do lines[#lines + 1] = line end
+      if #lines > 0 then return lines end
+    end
     return { "Choose a " .. UTF8_POKEMON .. "." }
   end
   return nil
@@ -318,9 +325,16 @@ end
 -- The opponent's box may go down to row 96 (the top of the Game Boy text
 -- area) with the prompt box up, or to the screen's last row without it.
 BattleUI.MAX_DOWN_NO_BOX = 144 - 56
-local ENEMY_MOVES = candidates({ 0, -BattleUI.MAX_MOVE, -2 }, { 0, BattleUI.MAX_MOVE, 2 })
-local ENEMY_MOVES_NO_BOX = candidates({ 0, -BattleUI.MAX_MOVE, -2 }, { 0, BattleUI.MAX_DOWN_NO_BOX, 2 })
-local PLAYER_MOVES = candidates({ 0, BattleUI.MAX_MOVE, 2 }, { 0, -BattleUI.MAX_MOVE, -2 })
+-- ...and sideways from 40 left to the screen's right edge (8 px).
+local ENEMY_MOVES = candidates({ 8, -BattleUI.MAX_MOVE, -2 }, { 0, BattleUI.MAX_MOVE, 2 })
+local ENEMY_MOVES_NO_BOX = candidates({ 8, -BattleUI.MAX_MOVE, -2 }, { 0, BattleUI.MAX_DOWN_NO_BOX, 2 })
+-- The player's box has the open middle of the field to its right (up to
+-- x 154 of 160); square windows put its card right above it.
+BattleUI.MAX_RIGHT = 90
+local PLAYER_MOVES = candidates({ 0, BattleUI.MAX_RIGHT, 2 }, { 0, -BattleUI.MAX_MOVE, -2 })
+-- with the prompt box out of the way the player's box may also go down,
+-- into the Game Boy text area (to the screen's last row)
+local PLAYER_MOVES_NO_BOX = candidates({ 0, BattleUI.MAX_RIGHT, 2 }, { 144 - 96, -BattleUI.MAX_MOVE, -2 })
 
 local function boxRect(g, box, dx, dy, top)
   local y0 = box[2] + (top or 0)
@@ -353,14 +367,41 @@ local function bestMove(list, rectFor, obstacles, extra)
 end
 
 -- farDown: the prompt box is out of the way, so the opponent may go lower.
+-- The two boxes are chosen together: among the opponent's nearest clear
+-- places, the first that also leaves the player's box a clear place.
+local JOINT_TRIES = 48
 function BattleUI.spriteMoves(game, obstacles, enemyTop, farDown)
-  local enemy, enemyClear = bestMove(farDown and ENEMY_MOVES_NO_BOX or ENEMY_MOVES, function(dx, dy)
-    return boxRect(game, BattleUI.ENEMY_BOX, dx, dy, enemyTop)
-  end, obstacles)
-  local enemyRect = boxRect(game, BattleUI.ENEMY_BOX, enemy[1], enemy[2], enemyTop)
-  local player, playerClear = bestMove(PLAYER_MOVES, function(dx, dy)
-    return boxRect(game, BattleUI.PLAYER_BOX, dx, dy)
-  end, obstacles, enemyRect)
+  local enemyBox = game.enemyBox or BattleUI.ENEMY_BOX
+  local playerBox = game.playerBox or BattleUI.PLAYER_BOX
+  local function enemyRect(m) return boxRect(game, enemyBox, m[1], m[2], enemyTop) end
+  local function playerFor(er)
+    return bestMove(farDown and PLAYER_MOVES_NO_BOX or PLAYER_MOVES, function(dx, dy)
+      return boxRect(game, playerBox, dx, dy)
+    end, obstacles, er)
+  end
+  local tried = 0
+  local firstEnemy
+  for _, m in ipairs(farDown and ENEMY_MOVES_NO_BOX or ENEMY_MOVES) do
+    local er = enemyRect(m)
+    local clear = true
+    for _, o in pairs(obstacles) do if overlaps(er, o) then clear = false break end end
+    if clear then
+      firstEnemy = firstEnemy or { m[1], m[2] }
+      local player, playerClear = playerFor(er)
+      if playerClear then return { m[1], m[2] }, player, true, true end
+      tried = tried + 1
+      if tried >= JOINT_TRIES then break end
+    end
+  end
+  -- no pair is clear: the opponent's nearest clear place (or its least
+  -- overlapping one) and the player's least overlapping place
+  local enemy, enemyClear = firstEnemy, firstEnemy ~= nil
+  if not enemy then
+    enemy = bestMove(farDown and ENEMY_MOVES_NO_BOX or ENEMY_MOVES, function(dx, dy)
+      return enemyRect({ dx, dy })
+    end, obstacles)
+  end
+  local player, playerClear = playerFor(enemyRect(enemy))
   return enemy, player, enemyClear, playerClear
 end
 
@@ -508,14 +549,24 @@ function BattleUI.draw(game, viewport)
   if refusal then
     boxLines = {}
     for line in refusal:gmatch("[^\n]+") do boxLines[#boxLines + 1] = line end
-  elseif menu and engineScene then
+  elseif menu and (engineScene or menu.kind == "switch") then
+    -- the engine scene keeps the screen's prompt up; every scene shows the
+    -- party menu's (so an item's target is always clear)
     boxLines = BattleUI.prompt(a, menu)
+  end
+  local okPanels, panels = pcall(a.panels, a)
+  if not okPanels then panels = nil end
+  -- Outside the engine scene a plain switch keeps the opponent's card ahead
+  -- of its prompt; choosing an item's target always shows the prompt.
+  if boxLines and not refusal and not engineScene and menu.kind == "switch"
+    and panels and panels.enemy and not panels.enemy.ballsOnly
+    and BattleUI.enemyOffset(area, "switch", rows, UI.messageRect(area)) == nil then
+    local okI, itemUse = pcall(a.partyItemUse, a, menu.menu)
+    if not (okI and itemUse) then boxLines = nil end
   end
   local messageBox = boxLines or (owned and not menu)
   local boxRect
   if boxLines then boxRect = engineScene and engineRect or UI.messageRect(area) end
-  local okPanels, panels = pcall(a.panels, a)
-  if not okPanels then panels = nil end
   if panels then
     for _, side in ipairs({ "player", "enemy" }) do
       local p = panels[side]
@@ -555,19 +606,43 @@ function BattleUI.draw(game, viewport)
         and { x = place.right + 228 * k, y = place.top + 15 * k, w = 75 * k, h = 69 * k }
         or UI.enemyColumnRect(area, panels.enemy.shiftY or 0, panels.enemy.compact)
     end
+    local boxes = type(a.spriteBoxes) == "function" and a:spriteBoxes() or {}
     local gameRect = { x = viewport.gameX or 0, y = viewport.gameY or 0,
-      s = (viewport.gameWidth or 160) / 160 }
+      s = (viewport.gameWidth or 160) / 160,
+      enemyBox = boxes.enemy or BattleUI.ENEMY_BOX, playerBox = boxes.player or BattleUI.PLAYER_BOX }
     local top = enemyTop(a)
     local enemyTarget, playerTarget, eClear, pClear = BattleUI.spriteMoves(gameRect, obstacles, top)
-    -- a big Pokemon with a tall menu open: the prompt steps aside for that
-    -- moment so the sprite can move clear (battle messages always stay)
+    -- No clean place: first the cards leave out their portrait and balls
+    -- for that moment (the prompt stays up), and only then does the prompt
+    -- step aside so the sprites can go lower (battle messages always stay).
+    local compactObstacles
+    if not (eClear and pClear) and not messageLayout then
+      compactObstacles = {}
+      for n, o in pairs(obstacles) do compactObstacles[n] = o end
+      if panels and panels.player then
+        compactObstacles.player = { x = place.left + 21 * k, y = place.top + 15 * k, w = 75 * k, h = 69 * k }
+      end
+      if panels and panels.enemy then
+        compactObstacles.enemy = UI.enemyColumnRect(area, panels.enemy.shiftY or 0, true)
+      end
+      local e2, p2, c1, c2 = BattleUI.spriteMoves(gameRect, compactObstacles, top)
+      if c1 and c2 then
+        enemyTarget, playerTarget, eClear, pClear = e2, p2, true, true
+        if panels.player then panels.player.compact = true end
+        if panels.enemy then panels.enemy.compact = true end
+      end
+    end
     if not (eClear and pClear) and boxLines and not refusal and obstacles.box then
       local without = {}
-      for n, o in pairs(obstacles) do if n ~= "box" then without[n] = o end end
+      for n, o in pairs(compactObstacles or obstacles) do if n ~= "box" then without[n] = o end end
       local e2, p2, e2Clear, p2Clear = BattleUI.spriteMoves(gameRect, without, top, true)
       if e2Clear and p2Clear then
         enemyTarget, playerTarget = e2, p2
         boxLines = nil
+        if compactObstacles then
+          if panels.player then panels.player.compact = true end
+          if panels.enemy then panels.enemy.compact = true end
+        end
       end
     end
     local dt = love.timer and love.timer.getDelta and love.timer.getDelta() or 1 / 60
@@ -575,10 +650,10 @@ function BattleUI.draw(game, viewport)
     ease(glide.player, playerTarget, dt)
     local moves = {}
     if glide.enemy[1] ~= 0 or glide.enemy[2] ~= 0 then
-      moves[#moves + 1] = { box = BattleUI.ENEMY_BOX, dx = glide.enemy[1], dy = glide.enemy[2] }
+      moves[#moves + 1] = { box = gameRect.enemyBox, dx = glide.enemy[1], dy = glide.enemy[2] }
     end
     if glide.player[1] ~= 0 or glide.player[2] ~= 0 then
-      moves[#moves + 1] = { box = BattleUI.PLAYER_BOX, dx = glide.player[1], dy = glide.player[2] }
+      moves[#moves + 1] = { box = gameRect.playerBox, dx = glide.player[1], dy = glide.player[2] }
     end
     if #moves > 0 then drawMoved(a, gameRect, moves) end
   end
