@@ -202,6 +202,8 @@ end
 --   { kind = "switch", select = fn(i), memberCount = n, submenuOpen = fn(),
 --     selectSub = fn(action) }
 --   { kind = "yesno", select = fn(i) } (1 = YES, 2 = NO)
+--   { kind = "pack", select = fn(i), current = fn(), pocket = fn(delta)?,
+--     submenuOpen = fn()?, selectSub = fn(i)? }
 -- tap = fn(button) queues a host button press (mod.input:tap).
 function Menu.step(game, ctx, mode, tap, cNow)
   Controller.update(game)
@@ -254,6 +256,8 @@ function Menu.step(game, ctx, mode, tap, cNow)
       return "tab:" .. to
     end
   elseif ctx.kind == "switch" then
+    -- a refusal box over the list: A / B are the box's until it closes
+    if ctx.text then pendingSub = nil; return nil end
     if ctx.submenuOpen() then
       if pendingSub then
         local want = pendingSub
@@ -316,6 +320,33 @@ function Menu.step(game, ctx, mode, tap, cNow)
     end
     if queued.left then ctx.select(2); return "no" end
     if queued.right then ctx.select(1); return "yes" end
+  elseif ctx.kind == "stats" then
+    -- A / B close it as before; a tap on the card does the same
+    for _, t in ipairs(pressedTaps) do
+      if UI.hitAt(t.x, t.y) == "stats" then tap("a"); return "stats" end
+    end
+  elseif ctx.kind == "pack" then
+    -- the host list keeps its own D-pad, A and B; taps pick directly
+    for _, t in ipairs(pressedTaps) do
+      local id = UI.hitAt(t.x, t.y)
+      local sub = id and tonumber(id:match("^packsub:(%d+)$"))
+      local row = id and tonumber(id:match("^pack:(%d+)$"))
+      local pocket = id and tonumber(id:match("^pocket:(%-?%d+)$"))
+      if sub and ctx.selectSub and ctx.selectSub(sub) then
+        tap("a")
+        return "packsub:" .. sub
+      elseif row and not (ctx.submenuOpen and ctx.submenuOpen()) then
+        if type(ctx.current) == "function" and ctx.current() == row then
+          tap("a")
+          return "pack:" .. row
+        end
+        ctx.select(row)
+        return "packrow:" .. row
+      elseif pocket and ctx.pocket then
+        ctx.pocket(pocket)
+        return "pocket:" .. pocket
+      end
+    end
   elseif ctx.kind == "moves" then
     if stadium then withhold(game, "a") end
     local slot
@@ -373,6 +404,10 @@ function Menu.draw(view)
     local lines = {}
     for i, line in ipairs(view.lines or {}) do lines[i] = UI.toLatin1(line) end
     UI.yesNo(lines, view.yesIndex)
+  elseif view.kind == "pack" then
+    UI.packList(view)
+  elseif view.kind == "stats" then
+    UI.statsCard(view)
   elseif view.kind == "moves" then
     local moves = view.moves or {}
     local info = Menu.infoSlot(view.game, view.mode, view.moveIndex, #moves)

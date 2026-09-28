@@ -12,6 +12,12 @@ fonts are painted in code, following the look of the original.
   accuracy and, in Gen 2, the move's description)
 - Switch cards for up to six Pokemon (Stadium teams have three)
 - Stadium's YES/NO window for the game's yes/no questions
+- Additions in the same style (Stadium 2 battles have none of these): the
+  PACK as a Stadium item list (Gen 2's pockets, USE/QUIT and item
+  descriptions included), the party cards for using an item on a Pokemon,
+  the level-up stats card, and an EXP bar inside your Pokemon's card
+- The game's own texts around a battle (evolution, refusals such as
+  "already out!") in Stadium's message box
 
 It draws over the Game Boy battle, or over STADIUM2_IMPORTER's 3D battle.
 The portrait box beside each status panel shows the Pokemon's front sprite
@@ -29,7 +35,8 @@ only when there is no room), so nothing overlaps or leaves the screen.
 In the game's own (unmodded) battle scene the Game Boy screen stays full
 size, and a Pokemon's sprite box that would touch the UI is moved just far
 enough to clear it (the opponent's down, yours right), gliding when menus
-open and close. When space is tight the status cards leave out their
+open and close. The move diamond and the party cards are quick picks and may
+cover the sprites: the boxes stay where they were for them. When space is tight the status cards leave out their
 portrait and party balls for that moment, and as a last resort the prompt
 box steps aside. The host's WIDE battle layout and the "world" battle
 background are left as they are.

@@ -59,6 +59,98 @@ b1.player.substituteHP=5
 ok(a1:panel("player").dex==nil,"no portrait for the Substitute doll")
 b1.player.substituteHP=nil
 
+-- The battle bag (Gen 1): the Stadium item list stands in for the host box.
+local ListMenu,TextBox={}, {}
+package.loaded["src.ui.ListMenu"]=ListMenu
+package.loaded["src.render.TextBox"]=TextBox
+local bag=setmetatable({kind="bag",title="ITEMS",index=1,scroll=0,cursorRows=3,
+  items={{value="POTION",label="POTION",count=3},{value="POKE_BALL",label="POK\195\169 BALL",count=5},
+    {value="ANTIDOTE",label="ANTIDOTE",count=1},{value="BIKE",label="BICYCLE"},{cancel=true,label="CANCEL"}}},ListMenu)
+game1.stack.states={b1,bag}; b1.phase="menu"
+local packCtx=BattleUI.menuContext()
+ok(packCtx and packCtx.kind=="pack" and BattleUI.hidesState(bag),"Gen 1 bag: Stadium item list, host box hidden")
+ok(BattleUI.bottomVisible(b1)==false,"the host's bottom box stays hidden under the item list")
+packCtx.select(5); ok(bag.index==5 and bag.scroll==2,"row pick drives the host cursor and its 3-row window")
+local pv=a1:packView(packCtx)
+ok(pv.title=="ITEMS" and #pv.rows==5 and pv.rows[1].count==3 and pv.rows[4].count==nil and pv.rows[5].cancel,"item rows, counts and CANCEL")
+ok(BattleUI.prompt(a1,packCtx)[1]=="Use which item?","item list prompt")
+local refused=setmetatable({visibleText=function() return {"OAK: RED!","This isn't the"} end},TextBox)
+game1.stack.states={b1,bag,refused}
+packCtx=BattleUI.menuContext()
+ok(packCtx.kind=="pack" and BattleUI.hidesState(refused) and BattleUI.hidesState(bag),"a message over the bag: both hidden")
+ok(BattleUI.prompt(a1,packCtx)[1]=="OAK: RED!","the bag's message shows in the Stadium box")
+packCtx.select(1); ok(bag.index==5,"the list holds still under a message")
+game1.stack.states={b1,{}}
+ok(BattleUI.menuContext()==nil,"another screen over the battle: no command bar (its D-pad stays its own)")
+game1.stack.states={b1}
+
+-- Level-up stats (Gen 1): the Stadium card stands in for the StatBox.
+local StatBox={}
+BS1.StatBox=StatBox
+local sb=setmetatable({mon={nickname="PIKACHU",level=41,species=25,stats={attack=60,defense=45,speed=90,special=55}}},StatBox)
+b1.phase="messages"; b1.visibleText=function() return {"PIKACHU grew","to level 41!"} end
+game1.stack.states={b1,sb}
+local statCtx=BattleUI.menuContext()
+ok(statCtx and statCtx.kind=="stats" and BattleUI.hidesState(sb),"Gen 1 stats: Stadium card, host window hidden")
+local sv=a1:statsView(statCtx)
+ok(sv.name=="PIKACHU" and sv.level==41 and #sv.rows==4 and sv.rows[1][1]=="ATTACK" and sv.rows[3][2]==90,"the host's four stats")
+ok(BattleUI.prompt(a1,statCtx)[1]=="PIKACHU grew","the grew-to-level line stays in the box")
+ok(UI.menuBottom("stats")>=19+15+5*12+3+4,"the stats card fits five rows")
+game1.stack.states={b1}; b1.phase="menu"
+
+-- Evolution (Gen 1): its text boxes over the battle go to the Stadium box.
+local EvolutionState={}
+package.loaded["src.ui.EvolutionState"]=EvolutionState
+local intro=setmetatable({visibleText=function() return {"What?","PIKACHU is"} end},TextBox)
+local hold={t=0,update=function() end,draw=function() end}
+game1.stack.states={b1,intro,hold}
+local ht=BattleUI.hostText()
+ok(ht and ht.lines[1]=="What?" and not ht.evolution and BattleUI.hidesState(intro),"evolving text: Stadium box, host box hidden")
+ok(BattleUI.menuContext()==nil,"no menu over the evolution")
+local movie=setmetatable({},EvolutionState)
+game1.stack.states={b1,intro,movie}
+ht=BattleUI.hostText()
+ok(ht and ht.evolution and ht.lines[1]=="What?" and BattleUI.hidesState(intro) and not BattleUI.hidesState(movie),"movie: the scene stays native, its text in the Stadium box")
+local done=setmetatable({visibleText=function() return {"PIKACHU evolved","into RAICHU!"} end},TextBox)
+game1.stack.states={b1,intro,movie,done}
+ht=BattleUI.hostText()
+ok(ht.lines[2]=="into RAICHU!" and BattleUI.hidesState(done) and BattleUI.hidesState(intro),"evolved text in the Stadium box")
+game1.stack.states={b1,bag,refused}
+ok(BattleUI.hostText()==nil,"a box over the bag is the bag's, not host text")
+game1.stack.states={b1}
+ok(BattleUI.hostText()==nil,"nothing over the battle: no host text")
+
+-- EXP bar: Gen 1 from the growth curve, gliding up and over a level.
+package.loaded["src.pokemon.Growth"]={expForLevel=function(_,lv) return lv*100 end}
+b1.data={pokemon={[25]={name="PIKACHU",growthRate="MEDIUM_FAST"}}}
+local expMon={level=10,exp=1050,species=25,hp=10,stats={hp=20}}
+ok(math.abs(a1:expFraction(expMon)-0.5)<1e-9,"Gen 1 EXP: half way to the next level")
+expMon.level=100; ok(a1:expFraction(expMon)==1,"level 100: full bar")
+local glideMon={}
+ok(BattleUI.expGlide(glideMon,10,0.5,0)==0.5,"first sight: the bar starts where the EXP is")
+ok(math.abs(BattleUI.expGlide(glideMon,10,0.8,0.1)-0.62)<1e-9,"then climbs toward new EXP")
+local v=BattleUI.expGlide(glideMon,11,0.1,0.5)
+ok(v==0,"a level gained: the bar fills, then starts over")
+ok(math.abs(BattleUI.expGlide(glideMon,11,0.1,0.05)-0.06)<1e-9 and BattleUI.expGlide(glideMon,11,0.1,1)==0.1,"and climbs to the new level's EXP")
+ok(BattleUI.expGlide({},11,0.3,0.1)==0.3,"another Pokemon: no glide")
+
+-- Picking the Pokemon already out: the host's refusal box over its party
+-- list stays in the Stadium layout (cards, refusal in the Stadium box).
+local outParty=setmetatable({battle=b1,party={mon,mon},index=1},PartyMenu)
+local outBox=setmetatable({visibleText=function() return {"PIKACHU is","already out!"} end},TextBox)
+game1.stack.states={b1,outParty,outBox}; b1.phase="messages"
+local outCtx=BattleUI.menuContext()
+ok(outCtx and outCtx.kind=="switch" and outCtx.text==outBox,"refusal over the party: still the Stadium cards")
+ok(BattleUI.hidesState(outParty) and BattleUI.hidesState(outBox),"host list and its refusal box both hidden")
+ok(a1:menuView(outCtx).message=="PIKACHU is\nalready out!","the refusal shows in the Stadium box")
+outCtx.select(2); ok(outParty.index==1,"the cards hold still under the refusal")
+local Menu=require("mods.STADIUM2_UI.lib.stadium_menu")
+local tapped
+local outGame={input={pressQueue={"a"},isDown=function() return false end}}
+Menu.step(outGame,outCtx,"stadium",function(b) tapped=b end)
+ok(outGame.input.pressQueue[1]=="a" and tapped==nil,"A reaches the refusal box (not withheld, no switch pick)")
+game1.stack.states={b1}; b1.phase="menu"
+
 -- Deferring and disabling -------------------------------------------------
 package.loaded["mods.STADIUM2_IMPORTER.lib.importer"]={stadiumUiEnabled=function() return true end}
 ok(BattleUI.menuContext()==nil and BattleUI.statusVisible(b1)==true,"stands aside for the importer's own Stadium UI")
@@ -96,6 +188,78 @@ ctx.select(2); ok(screen.shiftIndex==2,"YES/NO select drives Gold's cursor")
 screen.phase="menu"; screen.contest=true
 ok(BattleUI.menuContext()==nil and BattleUI.bottomVisible(screen)==true,"Bug Contest menu stays native")
 screen.contest=nil
+-- The battle PACK (Gen 2): pockets, USE/QUIT, messages and descriptions.
+local PackMenu2={}
+PackMenu2.__index=PackMenu2
+package.loaded["src.ui.gen2.PackMenu"]=PackMenu2
+function PackMenu2:inBattle() return self.battle end
+function PackMenu2:pocket() return {id="ITEM",label="ITEMS"} end
+function PackMenu2:ensureVisible() self.visible=true end
+function PackMenu2:switchPocket(d) self.pocketMoved=d end
+function PackMenu2:pagesFor(lines) return {{lines[1],lines[2]},{lines[3]}} end
+function PackMenu2:playerName() return "GOLD" end
+function PackMenu2:description() return "Restores HP by<NEXT>20 points." end
+local pack=setmetatable({battle=true,index=1,rows={{id="POTION",name="POTION",count=2,showCount=true},
+  {id="TM_01",name="TM01",tmhmLabel="01",teaches="DYNAMICPUNCH",count=1,showCount=true}}},PackMenu2)
+game2.stack.states={screen,pack}; screen.phase="menu"
+local pc2=BattleUI.menuContext()
+ok(pc2 and pc2.kind=="pack" and BattleUI.hidesState(pack),"Gen 2 PACK: Stadium item list, host screen hidden")
+pc2.select(2); ok(pack.index==2 and pack.visible,"row pick drives the PACK cursor")
+pc2.pocket(1); ok(pack.pocketMoved==1,"pocket arrows switch pockets")
+local v2=a2:packView(pc2)
+ok(v2.pockets and v2.title=="ITEMS" and #v2.rows==3 and v2.rows[3].cancel,"pocket rows and CANCEL")
+ok(v2.rows[2].name=="01 DYNAMICPUNCH","TM rows read as the move")
+ok(v2.description[1]=="Restores HP by" and v2.description[2]=="20 points.","description split at <NEXT>")
+pack.submenu={rows={"use","quit"},index=1}
+v2=a2:packView(pc2)
+ok(v2.submenu.labels[1]=="USE" and v2.submenu.labels[2]=="QUIT","USE / QUIT submenu")
+ok(pc2.selectSub(2) and pack.submenu.index==2,"submenu pick")
+pc2.select(1); ok(pack.index==2,"list holds under the submenu")
+pack.submenu=nil
+pack.message={"OAK: {PLAYER}!","This isn't the","time to use that!"}; pack.messagePage=1
+ok(BattleUI.prompt(a2,pc2)[1]=="OAK: GOLD!" and BattleUI.prompt(a2,pc2)[2]=="This isn't the","PACK message page in the Stadium box")
+pack.message=nil
+game2.stack.states={screen,{}}
+ok(BattleUI.menuContext()==nil,"Gen 2: another screen on top, no command bar")
+game2.stack.states={screen}
+-- Level-up stats (Gen 2): the screen's own stats box is covered only while
+-- the Stadium UI is drawing.
+local hostDrew=0
+function BS2.drawStatsBox() hostDrew=hostDrew+1 end
+screen.phase="stats-box"; screen.statsBoxMon={level=21,stats={attack=30,defense=31,specialAttack=40,specialDefense=41,speed=50}}
+local st2=BattleUI.menuContext()
+ok(st2 and st2.kind=="stats","Gen 2 stats-box phase: the Stadium card")
+local sv2=a2:statsView(st2)
+ok(#sv2.rows==5 and sv2.rows[3][1]=="SPCL.ATK" and sv2.rows[5][2]==50 and sv2.level==21,"Gen 2's five stats")
+local covering=true
+a2:coverStatsBox(function() return covering end)
+screen:drawStatsBox(screen.statsBoxMon)
+ok(hostDrew==0,"host stats box skipped while the Stadium UI draws")
+covering=false
+screen:drawStatsBox(screen.statsBoxMon)
+ok(hostDrew==1,"host stats box back when the Stadium UI is not drawing")
+a2:release()
+ok(rawget(screen,"drawStatsBox")==nil,"release removes the cover")
+screen.phase="menu"; screen.statsBoxMon=nil
+screen.shownExp=32; screen.shownLevel=20
+ok(a2:panels().player.exp==0.5 and a2:panels().player.level==20,"Gen 2 EXP: the host's crawling bar and level")
+screen.shownExp=nil; screen.shownLevel=nil
+-- Evolution (Gen 2): the EvolutionAnim's lines, its drawPanel covered.
+local EvolutionAnim={}
+EvolutionAnim.__index=EvolutionAnim
+package.loaded["src.ui.gen2.EvolutionAnim"]=EvolutionAnim
+local seen
+function EvolutionAnim:drawPanel() seen=self.lines end
+local anim=setmetatable({lines={"Congratulations! Your","CYNDAQUIL"}},EvolutionAnim)
+game2.stack.states={screen,anim}
+local h2=BattleUI.hostText()
+ok(h2 and h2.evolution and h2.lines[2]=="CYNDAQUIL","Gen 2 evolution text for the Stadium box")
+local cov=true
+a2:coverHostText(h2,function() return cov end)
+anim:drawPanel(); ok(seen==nil and anim.lines[1]=="Congratulations! Your","host panel drawn without its lines, which stay intact")
+cov=false; anim:drawPanel(); ok(seen and seen[1]=="Congratulations! Your","lines back when the Stadium UI is not drawing")
+a2:release(); ok(rawget(anim,"drawPanel")==nil,"release removes the evolution cover")
+game2.stack.states={screen}
 local ev={kind="move",side="enemy"}
 screen.queue={ev}; a2:track(); screen.queue={}; a2:track()
 ok(a2:messageSide()=="enemy","the move leaving the queue sets the message side")
@@ -159,14 +323,16 @@ for _,size in ipairs(sizes) do
   local sc=math.min(H/144,W/160); local gw,gh=160*sc,144*sc
   local vp={width=W,height=H,gameX=(W-gw)/2,gameY=(H-gh)/2,gameWidth=gw,gameHeight=gh}
   local place=UI.placement(area); local k=place.scale
-  local player={x=place.left+21*k,y=place.top+15*k,w=75*k,h=112*k}
+  local player={x=place.left+21*k,y=place.top+15*k,w=75*k,h=UI.PLAYER_COLUMN_H*k}
   local label=W.."x"..H
   local scenarios={
     {menu="command"},{menu="moves"},{menu="info"},{menu="yesno"},
     {menu="switch",rows=1},{menu="switch",rows=2},
     {menu="switch",rows=2,refusal=true},{menu="command",engine=true},
     {menu="yesno",engine=true},{menu="moves",engine=true},{menu="switch",rows=1,engine=true},
-    {menu="switch",rows=2,engine=true},{message=true},{message=true,engine=true}}
+    {menu="switch",rows=2,engine=true},{menu="pack",refusal=true},{menu="pack",engine=true},
+    {menu="stats",engine=true},{menu="stats",refusal=true},
+    {message=true},{message=true,engine=true}}
   for _,sc2 in ipairs(scenarios) do
     local name=label.." "..(sc2.menu or "message")..(sc2.rows==2 and "x2" or "")..(sc2.engine and " engine" or "")..(sc2.refusal and " refusal" or "")
     local rects={}
@@ -245,7 +411,7 @@ for _,size in ipairs(sizes) do
   local label=W.."x"..H.." sprites"
   for _,kind in ipairs({"command","moves","info","yesno","switch"}) do
     local obstacles={menu=BattleUI.menuRect(area,kind,1),
-      player={x=place.left+21*k,y=place.top+15*k,w=75*k,h=112*k}}
+      player={x=place.left+21*k,y=place.top+15*k,w=75*k,h=UI.PLAYER_COLUMN_H*k}}
     local e,p,eClear,pClear=BattleUI.spriteMoves(game,obstacles,0)
     ok(e[2]>=0 and e[2]<=40 and e[1]<=8 and e[1]>=-40,label.." "..kind..": opponent moves down/sideways within limits")
     ok(game.x+(96+e[1]+56)*sc<=game.x+160*sc+0.5,label.." "..kind..": opponent stays on the Game Boy screen")
@@ -284,7 +450,7 @@ do
     local game={x=(W-160*sc)/2,y=(H-144*sc)/2,s=sc,enemyBox=Gen1.SPRITE_BOXES.enemy,playerBox=Gen1.SPRITE_BOXES.player}
     local place=UI.placement(area); local k=place.scale
     for _,kind in ipairs({"command","moves"}) do
-      local obstacles={menu=BattleUI.menuRect(area,kind,1),player={x=place.left+21*k,y=place.top+15*k,w=75*k,h=112*k}}
+      local obstacles={menu=BattleUI.menuRect(area,kind,1),player={x=place.left+21*k,y=place.top+15*k,w=75*k,h=UI.PLAYER_COLUMN_H*k}}
       local e,p,ec,pc=BattleUI.spriteMoves(game,obstacles,0)
       local pb=game.playerBox
       local pr={x=game.x+(pb[1]+p[1])*sc,y=game.y+(pb[2]+p[2])*sc,w=pb[3]*sc,h=pb[4]*sc}
@@ -301,6 +467,18 @@ do -- 16:9: the command bar alone moves the opponent a little, not to the bottom
   print(("  16:9 command bar: opponent's box moves (%d, %d) Game Boy pixels"):format(e[1],e[2]))
   local d=BattleUI.spriteMoves(game,{menu=BattleUI.menuRect({x=0,y=0,w=1920,h=1080},"moves",1)},0)
   print(("  16:9 move diamond: opponent's box moves (%d, %d)"):format(d[1],d[2]))
+end
+
+do -- the move diamond and party cards may cover the sprites; the command bar may not
+  ok(BattleUI.MENUS_OVER_SPRITES.moves and BattleUI.MENUS_OVER_SPRITES.switch,"moves and party menus may cover the sprites")
+  ok(not BattleUI.MENUS_OVER_SPRITES.command and not BattleUI.MENUS_OVER_SPRITES.yesno,"command bar and YES/NO still push them")
+  local sc=7.5; local game={x=(1920-1200)/2,y=0,s=sc}
+  local area={x=0,y=0,w=1920,h=1080}
+  local held=BattleUI.spriteMoves(game,{menu=BattleUI.menuRect(area,"command",1)},0)
+  ok(BattleUI.movesClear(game,{},0,held,{0,0}),"with no obstacles a held place stays clear")
+  ok(not BattleUI.movesClear(game,{menu=BattleUI.menuRect(area,"moves",1)},0,{0,0},{0,0}),
+    "the move diamond does cover the unmoved opponent (so holding matters)")
+  ok(BattleUI.movesClear(game,{menu=BattleUI.menuRect(area,"command",1)},0,held,{0,0}),"the command bar's place is clear of it")
 end
 
 -- main.lua --------------------------------------------------------------

@@ -54,6 +54,16 @@ local function importerExports()
   return ok and handle and handle.exports or nil
 end
 
+-- STADIUM2_IMPORTER presents an evolution in its 3D scene (its own camera,
+-- text box and hidden host screens): this UI stands aside meanwhile.
+function BattleUI.importerEvolution()
+  local exports = importerExports()
+  local presented = exports and exports.evolutionPresented
+  if type(presented) ~= "function" then return false end
+  local ok, on = pcall(presented)
+  return ok and on == true
+end
+
 -- The adapter for the battle on `game`'s state stack, or nil.
 function BattleUI.adapterFor(game)
   local states = game and game.stack and game.stack.states
@@ -108,10 +118,25 @@ end
 -- stand in for.
 function BattleUI.hidesState(state)
   if not (adapter and BattleUI.active()) then return false end
+  if BattleUI.importerEvolution() then return false end
+  local text = BattleUI.hostText()
+  if text then
+    for _, box in ipairs(text.hide or {}) do if box == state then return true end end
+    return false
+  end
   local ok, menu = pcall(adapter.menuContext, adapter)
   if not ok or not menu then return false end
   local okH, hides = pcall(adapter.hidesState, adapter, state, menu)
   return okH and hides == true
+end
+
+-- Host text the Stadium box stands in for outside the battle's own
+-- messages (the evolution's texts), when no Stadium menu is open.
+function BattleUI.hostText()
+  if not (adapter and BattleUI.active()) or type(adapter.hostText) ~= "function" then return nil end
+  if BattleUI.importerEvolution() then return nil end
+  local ok, text = pcall(adapter.hostText, adapter)
+  return ok and text or nil
 end
 
 function BattleUI.menuContext()
@@ -213,6 +238,17 @@ function BattleUI.prompt(a, menu)
     return { name and ("What will " .. name .. " do?") or "What will you do?" }
   elseif menu.kind == "moves" then
     return { name and ("Which move will " .. name .. " use?") or "Which move?" }
+  elseif menu.kind == "stats" then
+    -- the "grew to level" line stays up under the stats
+    return a:messageLines()
+  elseif menu.kind == "pack" then
+    -- the PACK's own text (a message page, a description), else a prompt
+    local okV, view = pcall(a.packView, a, menu)
+    if okV and view then
+      if view.message and #view.message > 0 then return view.message end
+      if view.description then return view.description end
+    end
+    return { "Use which item?" }
   elseif menu.kind == "switch" then
     -- the host party menu's own prompt (item use, forced switch, ...)
     local okP, text = pcall(a.partyPrompt, a, menu.menu)
@@ -259,7 +295,7 @@ function BattleUI.menuRect(area, kind, rows)
   local place = UI.placement(area)
   local k = place.scale
   return { x = place.menuX + UI.MENU_LEFT * k, y = place.top,
-    w = (UI.MENU_RIGHT - UI.MENU_LEFT) * k, h = UI.menuBottom(kind, rows) * k }
+    w = (UI.menuRight(kind) - UI.MENU_LEFT) * k, h = UI.menuBottom(kind, rows) * k }
 end
 
 -- Stage offset of the opponent's column in the cards' normal layout:
@@ -405,6 +441,21 @@ function BattleUI.spriteMoves(game, obstacles, enemyTop, farDown)
   return enemy, player, enemyClear, playerClear
 end
 
+-- Whether both boxes, moved by e and p, are clear of every obstacle.
+function BattleUI.movesClear(game, obstacles, enemyTop, e, p)
+  local er = boxRect(game, game.enemyBox or BattleUI.ENEMY_BOX, e[1], e[2], enemyTop)
+  local pr = boxRect(game, game.playerBox or BattleUI.PLAYER_BOX, p[1], p[2])
+  for _, o in pairs(obstacles) do
+    if overlaps(er, o) or overlaps(pr, o) then return false end
+  end
+  return true
+end
+
+-- Menus that may cover the sprite boxes: the move diamond and the party
+-- cards are brief picks, so the sprites hold where they were rather than
+-- moving again for them (only the prompt box and cards still push them).
+BattleUI.MENUS_OVER_SPRITES = { moves = true, switch = true, pack = true, stats = true }
+
 -- Blank rows at the top of the opponent's box: its sprite stands on the
 -- box's bottom edge (both games bottom-align front pics in the 7x7 slot).
 local function enemyTop(a)
@@ -417,6 +468,8 @@ local function enemyTop(a)
 end
 
 local glide = { enemy = { 0, 0 }, player = { 0, 0 } }
+-- the targets last chosen (held while a menu that may cover them is up)
+local held
 local function ease(cur, target, dt)
   local t = math.min(1, dt * BattleUI.GLIDE)
   cur[1] = cur[1] + (target[1] - cur[1]) * t
@@ -506,9 +559,43 @@ function BattleUI.enemyPortraitOverGame(area, viewport, shift)
   return x < gx + gw and x + 32 * k > gx and y < gy + gh and y + 32 * k > gy
 end
 
+-- Gen 1's EXP lands at once (no bar in the game): the Stadium bar climbs to
+-- it, filling and starting over for each level gained. Gen 2's host bar
+-- already crawls, so its value is shown as it is.
+BattleUI.EXP_RATE = 1.2 -- bar lengths per second
+local expShown
+function BattleUI.expGlide(mon, level, target, dt)
+  if not (mon and level and target) then expShown = nil return target end
+  local s = expShown
+  if not s or s.mon ~= mon or level < s.level or level > s.level + 5 then
+    expShown = { mon = mon, level = level, value = target }
+    return target
+  end
+  local step = BattleUI.EXP_RATE * (dt or 0)
+  if level > s.level then
+    s.value = s.value + step
+    if s.value >= 1 then s.level, s.value = s.level + 1, 0 end
+  elseif target < s.value then s.value = target
+  else s.value = math.min(target, s.value + step) end
+  return s.level < level and s.value or math.min(s.value, target)
+end
+
+-- When the Stadium UI last drew (the Gen 2 stats box cover only holds
+-- while it is drawing).
+local lastDraw = -math.huge
+local function now() return love and love.timer and love.timer.getTime and love.timer.getTime() or 0 end
+function BattleUI.drawing(a)
+  return adapter == a and BattleUI.active() and now() - lastDraw < 0.25
+end
+
 function BattleUI.draw(game, viewport)
   local a = BattleUI.adapterFor(game)
   if not (a and viewport and BattleUI.active()) then return false end
+  lastDraw = now()
+  if BattleUI.importerEvolution() then return true end
+  if type(a.coverStatsBox) == "function" then
+    pcall(a.coverStatsBox, a, function() return BattleUI.drawing(a) end)
+  end
   if a.track then pcall(a.track, a) end
   local area = areaFor(viewport)
   local menu = BattleUI.menuContext()
@@ -535,6 +622,16 @@ function BattleUI.draw(game, viewport)
     end
     return UI.tryDrawMessage(area, lines, side, warn)
   end
+  -- the evolution's texts: only the Stadium box (no cards, no moved sprite
+  -- boxes over the evolution scene)
+  local hostText = not menu and BattleUI.hostText() or nil
+  if hostText then
+    if type(a.coverHostText) == "function" then
+      pcall(a.coverHostText, a, hostText, function() return BattleUI.drawing(a) end)
+    end
+    if hostText.lines and #hostText.lines > 0 then drawBox(hostText.lines, "player") end
+    return true
+  end
   -- a box shown with a menu: the switch screen's refusal message, or in
   -- the normal battle scene the screen's prompt
   local rows = 1
@@ -545,11 +642,18 @@ function BattleUI.draw(game, viewport)
     local okV, view = pcall(a.menuView, a, menu)
     refusal = okV and type(view.message) == "string" and view.message ~= "" and view.message or nil
   end
+  if menu and menu.kind == "pack" then
+    -- a PACK message holds the pack like a refusal (it always stays up)
+    local okV, view = pcall(a.packView, a, menu)
+    if okV and view and view.message and #view.message > 0 then
+      refusal = table.concat(view.message, "\n")
+    end
+  end
   local boxLines
   if refusal then
     boxLines = {}
     for line in refusal:gmatch("[^\n]+") do boxLines[#boxLines + 1] = line end
-  elseif menu and (engineScene or menu.kind == "switch") then
+  elseif menu and (engineScene or menu.kind == "switch" or menu.kind == "pack") then
     -- the engine scene keeps the screen's prompt up; every scene shows the
     -- party menu's (so an item's target is always clear)
     boxLines = BattleUI.prompt(a, menu)
@@ -584,12 +688,17 @@ function BattleUI.draw(game, viewport)
       end
     end
   end
+  if panels and panels.player and panels.player.exp and a.battle then
+    local dt = love.timer and love.timer.getDelta and love.timer.getDelta() or 1 / 60
+    panels.player.exp = BattleUI.expGlide(panels.player.mon, panels.player.level, panels.player.exp, dt)
+  end
   -- engine scene: move the sprite boxes clear of everything drawn below
   captured = frame
   if engineScene and spritesMovable(a) then
     local k = UI.placement(area).scale
     local obstacles = {}
-    if menu then obstacles.menu = BattleUI.menuRect(area, menu.kind, rows) end
+    local overSprites = menu and BattleUI.MENUS_OVER_SPRITES[menu.kind]
+    if menu and not overSprites then obstacles.menu = BattleUI.menuRect(area, menu.kind, rows) end
     if engineRect and messageBox then
       obstacles.box = { x = engineRect.x - 4 * k, y = engineRect.y - 4 * k,
         w = engineRect.w + 8 * k, h = engineRect.h + 8 * k }
@@ -599,7 +708,7 @@ function BattleUI.draw(game, viewport)
     if panels and panels.player then
       obstacles.player = messageLayout
         and { x = place.left + 21 * k, y = place.top + 15 * k, w = 75 * k, h = 69 * k }
-        or { x = place.left + 21 * k, y = place.top + 15 * k, w = 75 * k, h = 112 * k }
+        or { x = place.left + 21 * k, y = place.top + 15 * k, w = 75 * k, h = UI.PLAYER_COLUMN_H * k }
     end
     if panels and panels.enemy then
       obstacles.enemy = messageLayout
@@ -611,7 +720,12 @@ function BattleUI.draw(game, viewport)
       s = (viewport.gameWidth or 160) / 160,
       enemyBox = boxes.enemy or BattleUI.ENEMY_BOX, playerBox = boxes.player or BattleUI.PLAYER_BOX }
     local top = enemyTop(a)
-    local enemyTarget, playerTarget, eClear, pClear = BattleUI.spriteMoves(gameRect, obstacles, top)
+    local enemyTarget, playerTarget, eClear, pClear
+    if overSprites and held and BattleUI.movesClear(gameRect, obstacles, top, held.enemy, held.player) then
+      enemyTarget, playerTarget, eClear, pClear = held.enemy, held.player, true, true
+    else
+      enemyTarget, playerTarget, eClear, pClear = BattleUI.spriteMoves(gameRect, obstacles, top)
+    end
     -- No clean place: first the cards leave out their portrait and balls
     -- for that moment (the prompt stays up), and only then does the prompt
     -- step aside so the sprites can go lower (battle messages always stay).
@@ -645,6 +759,7 @@ function BattleUI.draw(game, viewport)
         end
       end
     end
+    held = { enemy = enemyTarget, player = playerTarget }
     local dt = love.timer and love.timer.getDelta and love.timer.getDelta() or 1 / 60
     ease(glide.enemy, enemyTarget, dt)
     ease(glide.player, playerTarget, dt)
@@ -669,6 +784,15 @@ function BattleUI.draw(game, viewport)
     view.moves = okMoves and moves or nil
     if menu.kind == "switch" then view.members, view.message = a:members(menu.menu), nil end
     if menu.kind == "yesno" then view.lines, view.yesIndex = a:messageLines(), menu.yesIndex end
+    if menu.kind == "stats" then
+      local okS, stats = pcall(a.statsView, a, menu)
+      if okS and stats then view.name, view.level, view.rows = stats.name, stats.level, stats.rows end
+    end
+    if menu.kind == "pack" then
+      local okP, pack = pcall(a.packView, a, menu)
+      if okP and pack then for key, value in pairs(pack) do view[key] = value end end
+      view.message = nil
+    end
     UI.tryDrawMenu(area, function() Menu.draw(view) end, warn)
   elseif owned then
     -- messages: both cards move to the top row, so the box has the width
@@ -678,7 +802,10 @@ function BattleUI.draw(game, viewport)
 end
 
 function BattleUI.release()
+  if adapter and type(adapter.release) == "function" then pcall(adapter.release, adapter) end
   glide = { enemy = { 0, 0 }, player = { 0, 0 } }
+  held = nil
+  expShown = nil
   captured = nil
   Portrait.release()
   SpritePortrait.release()

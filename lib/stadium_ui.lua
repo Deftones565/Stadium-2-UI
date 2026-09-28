@@ -198,6 +198,28 @@ function UI.hpBar(x, y, hp, maxHp)
   end
 end
 
+UI.EXP_COLOR = { 70, 180, 255 }
+-- The player's card grows by EXP_ROOM stage rows to hold the EXP bar inside
+-- its frame, under the HP numbers; the portrait and party balls below move
+-- down with it. PLAYER_COLUMN_H: the player's column (tag, card, portrait,
+-- balls) from stage row 15, the layout's obstacle for it.
+UI.EXP_ROOM = 4
+UI.PLAYER_COLUMN_H = 112 + UI.EXP_ROOM
+function UI.expBar(x, y, w, fraction)
+  fraction = math.max(0, math.min(1, fraction or 0))
+  setColor({ 20, 20, 20 })
+  g.rectangle("fill", x - 1, y - 1, w + 2, 4)
+  setColor(UI.HP_EMPTY)
+  g.rectangle("fill", x, y, w, 2)
+  local fill = math.floor(w * fraction + 0.5)
+  if fill > 0 then
+    setColor(UI.EXP_COLOR)
+    g.rectangle("fill", x, y, fill, 2)
+    setColor({ 190, 235, 255 })
+    g.rectangle("fill", x, y, fill, 1)
+  end
+end
+
 -- One status panel. data = {name, level, status, gender ("M"/"F"/nil),
 -- hp, maxHp, tag (trainer label), balls = {"ok"|"fainted"|..., ...}}.
 -- While a battle message shows, both cards sit on the top row (y19) with no
@@ -227,7 +249,10 @@ function UI.statusPanel(side, data, messageLayout)
     local tw = UI.textWidth(data.tag)
     UI.text(data.tag, p.x + math.floor((p.w - tw) / 2), p.tagY)
   end
-  UI.card(p.x, p.y, p.w, p.h, tint.card)
+  -- EXP bar (port addition: Stadium 2 has none): the player's card is
+  -- EXP_ROOM rows taller and holds the bar inside its frame
+  local extra = (side == "player" and data.exp) and UI.EXP_ROOM or 0
+  UI.card(p.x, p.y, p.w, p.h + extra, tint.card)
   -- name, centred on the card
   local name = tostring(data.name or "")
   local nw = UI.textWidth(name)
@@ -257,11 +282,12 @@ function UI.statusPanel(side, data, messageLayout)
   local maxText = tostring(math.max(0, math.floor(data.maxHp or 0)))
   setColor({ 255, 255, 255 })
   for i = 1, #maxText do digitCell(tonumber(maxText:sub(i, i)), p.x + 42 + 6 * (i - 1), p.y + 31) end
+  if extra > 0 then UI.expBar(p.x + 4, p.y + 42, p.w - 8, data.exp) end
   -- Portrait (func_8413FBC4): the 32x32 live render, under the player's
   -- card at (x, y+45) and above the opponent's at (x+31, y-35), framed in
   -- the card tint. Hidden in the message layout.
   if data.portrait and not messageLayout and not data.compact then
-    local px, py = p.x, p.y + 45
+    local px, py = p.x, p.y + 45 + extra
     if side ~= "player" then px, py = p.x + 31, p.y - 35 end
     -- the box's size in screen pixels, for sharp portraits (port extension)
     if g.transformPoint then
@@ -283,7 +309,7 @@ end
 function UI.panelBalls(side, p, balls)
   if not (balls and #balls > 0) then return end
   if side == "player" then
-    UI.partyBalls(p.x - 2, p.y + 81, balls)
+    UI.partyBalls(p.x - 2, p.y + 81 + UI.EXP_ROOM, balls)
   else
     UI.partyBalls(p.x + 59 - 7 * (#balls - 1), p.y - 45, balls)
   end
@@ -417,8 +443,16 @@ function UI.menuBottom(kind, rows)
   elseif kind == "moves" then return 80
   elseif kind == "info" then return 83
   elseif kind == "yesno" then return 71
-  elseif kind == "switch" then return (rows or 1) > 1 and 130 or 77 end
+  elseif kind == "switch" then return (rows or 1) > 1 and 130 or 77
+  elseif kind == "pack" then return 89
+  elseif kind == "stats" then return 101 end -- up to five rows (Gen 2)
   return 0
+end
+
+-- Rightmost stage column each menu uses (the stats card is narrow).
+function UI.menuRight(kind)
+  if kind == "stats" then return UI.STATS.x + UI.STATS.w + 5 end
+  return UI.MENU_RIGHT
 end
 
 -- Window rectangle of the (bottom-anchored) Stadium message box.
@@ -780,6 +814,129 @@ function UI.switchCards(members, selected, cRow, singleRow)
     end
   end
   UI.hint(4, 94, 19 + (singleRow and 1 or rows) * 53 - 4, 40)
+end
+
+-- PACK item list (port addition: Stadium 2 has no bag in battle). One card
+-- in the switch card's place and tint: the pocket title (with the pocket
+-- arrows in Gen 2), then four item rows with their counts, the cursor row
+-- lit. view = { title, pockets, rows = { {name, count, cancel} }, index,
+-- submenu = { labels, index } }. Hit ids: pack:i, pocket:-1/1, packsub:i.
+UI.PACK = { x = 94, y = 19, w = 201, rows = 4, rowH = 12, headerH = 15 }
+local packTop = 0
+
+-- The first row shown: the window follows the cursor, and stays put while
+-- the cursor moves inside it.
+function UI.packWindow(index, count, rows, top)
+  rows = rows or UI.PACK.rows
+  top = top or 0
+  index = math.max(1, math.min(index or 1, math.max(1, count)))
+  if index - top > rows then top = index - rows end
+  if index - top < 1 then top = index - 1 end
+  return math.max(0, math.min(top, math.max(0, count - rows)))
+end
+
+local function triangle(x, y, dir, color)
+  setColor(color or { 255, 255, 255 })
+  if dir == "left" then g.polygon("fill", x + 5, y, x + 5, y + 8, x, y + 4)
+  elseif dir == "right" then g.polygon("fill", x, y, x, y + 8, x + 5, y + 4)
+  elseif dir == "up" then g.polygon("fill", x, y + 4, x + 7, y + 4, x + 3.5, y)
+  else g.polygon("fill", x, y, x + 7, y, x + 3.5, y + 4) end
+end
+
+function UI.packList(view)
+  local p = UI.PACK
+  local rows = view.rows or {}
+  local h = p.headerH + p.rows * p.rowH + 3
+  UI.card(p.x, p.y, p.w, h, UI.TINT.player.card)
+  local title = UI.toLatin1(view.title or "PACK")
+  UI.text(title, p.x + math.floor((p.w - UI.textWidth(title)) / 2), p.y + 3)
+  if view.pockets then
+    triangle(p.x + 8, p.y + 5, "left")
+    triangle(p.x + p.w - 13, p.y + 5, "right")
+    hit("pocket:-1", p.x, p.y, 40, p.headerH)
+    hit("pocket:1", p.x + p.w - 40, p.y, 40, p.headerH)
+  end
+  -- the header rule, drawn like the switch card's column dividers
+  setColor({ 0, 0, 0 }); g.rectangle("fill", p.x + 3, p.y + p.headerH - 2, p.w - 6, 1)
+  setColor({ 173, 214, 255 }); g.rectangle("fill", p.x + 3, p.y + p.headerH - 1, p.w - 6, 1)
+  packTop = UI.packWindow(view.index, #rows, p.rows, packTop)
+  local submenuY
+  for r = 1, p.rows do
+    local i = packTop + r
+    local row = rows[i]
+    if not row then break end
+    local y = p.y + p.headerH + (r - 1) * p.rowH
+    local lit = i == view.index
+    if lit then
+      setColor({ 255, 255, 255 }, 70)
+      g.rectangle("fill", p.x + 3, y, p.w - 6, p.rowH)
+      submenuY = y
+    end
+    UI.text(UI.toLatin1(row.name or ""), p.x + 12, y + 1)
+    -- the count (left out under the submenu, which sits over that column)
+    if row.count and not (lit and view.submenu) then
+      local right = p.x + p.w - 12
+      local digits = #tostring(math.max(0, math.floor(row.count)))
+      UI.number(row.count, right, y + 2, 1)
+      -- a drawn times sign (the Stadium font has none), with the text shadow
+      local cx = right - 6 * digits - 7
+      for pass = 1, 2 do
+        local o = pass == 1 and 1 or 0
+        setColor(pass == 1 and UI.SHADOW or { 255, 255, 255 })
+        g.setLineWidth(1.5)
+        g.line(cx + o, y + 4 + o, cx + 5 + o, y + 9 + o)
+        g.line(cx + 5 + o, y + 4 + o, cx + o, y + 9 + o)
+      end
+      g.setLineWidth(1)
+    end
+    -- the cursor is the submenu's while it is open (the row stays lit)
+    if lit and not view.submenu then UI.cursorFrame(p.x + 4, y, p.w - 8, p.rowH - 1) end
+    hit("pack:" .. i, p.x, y, p.w, p.rowH)
+  end
+  if packTop > 0 then triangle(p.x + p.w - 10, p.y + p.headerH + 1, "up") end
+  if packTop + p.rows < #rows then triangle(p.x + p.w - 10, p.y + h - 6, "down") end
+  local sub = view.submenu
+  if sub and sub.labels and #sub.labels > 0 then
+    -- over the list's right end (the count column), inside the menu area
+    local sw, sh = 34, #sub.labels * p.rowH + 2
+    local sx = p.x + p.w - sw - 8
+    local sy = math.max(p.y, math.min((submenuY or p.y) , p.y + h - sh))
+    UI.card(sx, sy, sw, sh, UI.TINT.player.card)
+    for i, label in ipairs(sub.labels) do
+      local y = sy + 1 + (i - 1) * p.rowH
+      UI.text(UI.toLatin1(label), sx + 5, y + 1)
+      if i == sub.index then UI.cursorFrame(sx + 1, y, sw - 2, p.rowH - 1) end
+      hit("packsub:" .. i, sx, y, sw, p.rowH)
+    end
+  end
+end
+
+-- Level-up stats (port addition: Stadium 2 battles have no levels). The
+-- host's stats window as a card in the menu area, in the player tint: the
+-- Pokemon's name and level, then each stat with its value.
+-- view = { name, level, rows = { {label, value} } }. Hit id: stats.
+UI.STATS = { x = 94, y = 19, w = 140, rowH = 12, headerH = 15 }
+function UI.statsCard(view)
+  local c = UI.STATS
+  local rows = view.rows or {}
+  local h = c.headerH + #rows * c.rowH + 3
+  UI.card(c.x, c.y, c.w, h, UI.TINT.player.card)
+  UI.text(UI.toLatin1(view.name or ""), c.x + 8, c.y + 3)
+  if view.level then
+    local level = tostring(math.floor(view.level))
+    local x = c.x + c.w - 8 - 6 * (#level + 1)
+    setColor({ 255, 255, 255 })
+    digitCell(DIGIT_CELL.L, x, c.y + 4)
+    UI.number(view.level, c.x + c.w - 8, c.y + 4, 1)
+  end
+  setColor({ 0, 0, 0 }); g.rectangle("fill", c.x + 3, c.y + c.headerH - 2, c.w - 6, 1)
+  setColor({ 173, 214, 255 }); g.rectangle("fill", c.x + 3, c.y + c.headerH - 1, c.w - 6, 1)
+  for i, row in ipairs(rows) do
+    local y = c.y + c.headerH + (i - 1) * c.rowH
+    UI.text(UI.toLatin1(tostring(row[1] or "")), c.x + 8, y + 1)
+    UI.number(row[2] or 0, c.x + c.w - 8, y + 2, 1)
+  end
+  hit("stats", c.x, c.y, c.w, h)
 end
 
 -- Small font with its 1 px shadow (move-info frame: the shadow pass at

@@ -126,6 +126,14 @@ function Gen2:panels()
       local party = battle and (side == "player" and battle.party or (tag and battle.enemyParty) or nil)
       if type(party) == "table" then panel.balls = UI.partyBallStates(party) end
       if not self:substitute(side, mon) then panel.dex, panel.variant = self:speciesOf(mon) end
+      if side == "player" then
+        -- the EXP bar the host HUD crawls (shownExp of its 64 px, CalcExpBar),
+        -- at the level it is crawling through
+        local Hud = package.loaded["src.ui.gen2.BattleHud"]
+        local length = Hud and tonumber(Hud.EXP_LENGTH_PX) or 64
+        panel.exp = math.max(0, math.min(1, (tonumber(screen.shownExp) or 0) / length))
+        if tonumber(screen.shownLevel) then panel.level = screen.shownLevel end
+      end
       out[side] = panel
     elseif not live then
       -- the host's intro / send-out ball rows, as Stadium balls
@@ -198,6 +206,168 @@ function Gen2:partyItemUse(menu)
   return prompts ~= nil and prompts.useItem ~= nil and menu.prompt == prompts.useItem
 end
 
+-- The battle PACK (BattlePack) open over this battle.
+function Gen2:packMenu()
+  local states = self.screen.game and self.screen.game.stack and self.screen.game.stack.states
+  local top = type(states) == "table" and states[#states] or nil
+  if not top then return nil end
+  local ok, PackMenu = pcall(require, "src.ui.gen2.PackMenu")
+  if not ok or getmetatable(top) ~= PackMenu or top.give then return nil end
+  local okB, inBattle = pcall(top.inBattle, top)
+  if not (okB and inBattle) then return nil end
+  for _, state in ipairs(states) do
+    if state == self.screen then return top end
+  end
+  return nil
+end
+
+local function hostString(text)
+  if type(text) ~= "string" then return text end
+  local okS, Strings = pcall(require, "src.core.Strings")
+  if okS and Strings then
+    local ok, shown = pcall(Strings, text)
+    if ok and type(shown) == "string" then text = shown end
+  end
+  return (text:gsub("<PK><MN>", "POK\195\169MON"))
+end
+
+local SUBMENU_LABELS = { use = "USE", give = "GIVE", toss = "TOSS", sel = "SEL", quit = "QUIT" }
+
+-- The Stadium item list's contents (Menu.draw's `pack` view): the pocket's
+-- rows and CANCEL, the USE / QUIT submenu, and the text the PACK prints in
+-- its bottom box (a message page, else the item's description).
+function Gen2:packView(menu)
+  local pack = menu.menu
+  local rows = {}
+  for i, row in ipairs(pack.rows or {}) do
+    local name = row.name or ""
+    if row.tmhmLabel then name = row.tmhmLabel .. " " .. (row.teaches or name) end
+    rows[i] = { name = hostString(name), count = row.showCount and row.count or nil }
+  end
+  rows[#rows + 1] = { name = hostString("CANCEL"), cancel = true }
+  local okP, pocket = pcall(pack.pocket, pack)
+  local view = { title = okP and pocket and hostString(pocket.label) or "PACK", pockets = true,
+    rows = rows, index = pack.index }
+  if pack.submenu then
+    local labels = {}
+    for i, id in ipairs(pack.submenu.rows or {}) do labels[i] = hostString(SUBMENU_LABELS[id] or id) end
+    view.submenu = { labels = labels, index = pack.submenu.index }
+  end
+  if pack.message then
+    local okPg, pages = pcall(pack.pagesFor, pack, pack.message)
+    local page = okPg and type(pages) == "table" and pages[pack.messagePage or 1] or {}
+    local okN, player = pcall(pack.playerName, pack)
+    local lines = {}
+    for i, line in ipairs(page) do
+      lines[i] = hostString((tostring(line):gsub("{PLAYER}", okN and player or "")))
+    end
+    view.message = lines
+  else
+    local okD, text = pcall(pack.description, pack)
+    if okD and type(text) == "string" and text ~= "" then
+      local first, second = text:match("^(.-)<NEXT>(.*)$")
+      if not first then first, second = text:match("^(.-)\n(.*)$") end
+      view.description = { hostString(first or text), second and hostString(second) or nil }
+    end
+  end
+  return view
+end
+
+-- The level-up stats box (phase "stats-box"): the stats drawStatsBox prints,
+-- recomputed from the base stats the way it does (core.asm:7208-7213).
+local STATS_ROWS = { { "ATTACK", "attack" }, { "DEFENSE", "defense" },
+  { "SPCL.ATK", "specialAttack" }, { "SPCL.DEF", "specialDefense" }, { "SPEED", "speed" } }
+
+function Gen2:statsView(menu)
+  local screen, mon = self.screen, menu.mon
+  local stats = mon.stats
+  local data = screen.game and screen.game.data
+  local okM, Mon = pcall(require, "src.battle.gen2.Mon")
+  if okM and type(Mon) == "table" and Mon.partySpecies and Mon.stats then
+    local okS, species = pcall(Mon.partySpecies, mon)
+    local def = okS and data and data.pokemon and data.pokemon[species]
+    if def and def.baseStats then
+      local ok, fresh = pcall(Mon.stats, def.baseStats, mon.dvs, mon.level, mon.statExp)
+      if ok and type(fresh) == "table" then stats = fresh end
+    end
+  end
+  stats = stats or {}
+  local rows = {}
+  for i, row in ipairs(STATS_ROWS) do rows[i] = { hostString(row[1]), stats[row[2]] } end
+  return { name = call(screen, "name", mon) or mon.nickname or mon.name or "", level = mon.level, rows = rows }
+end
+
+-- The screen draws its stats box itself (no hook around it), so while the
+-- Stadium card stands in for it this battle screen's drawStatsBox skips the
+-- host box; the original runs whenever the Stadium UI is not drawing (the
+-- option off, the mod gone). The override lives on this one battle screen.
+function Gen2:coverStatsBox(covered)
+  local screen = self.screen
+  if rawget(screen, "drawStatsBox") then return end
+  local BattleState = Gen2.module()
+  local original = BattleState and BattleState.drawStatsBox
+  if type(original) ~= "function" then return end
+  local cover
+  cover = function(s, ...)
+    if rawget(s, "drawStatsBox") == cover and covered() then return end
+    return original(s, ...)
+  end
+  screen.drawStatsBox = cover
+  self.statsCover = cover
+end
+
+-- The evolution screen (EvolutionAnim, opaque, over this battle) and its
+-- text: { lines, evolution = true, scene = the screen }.
+function Gen2:hostText()
+  local states = self.screen.game and self.screen.game.stack and self.screen.game.stack.states
+  local top = type(states) == "table" and states[#states] or nil
+  if not top then return nil end
+  local ok, EvolutionAnim = pcall(require, "src.ui.gen2.EvolutionAnim")
+  if not ok or getmetatable(top) ~= EvolutionAnim then return nil end
+  local found = false
+  for _, state in ipairs(states) do
+    if state == self.screen then found = true break end
+  end
+  if not found then return nil end
+  local lines = {}
+  for i, line in ipairs(type(top.lines) == "table" and top.lines or {}) do lines[i] = hostString(tostring(line)) end
+  return { lines = lines, evolution = true, scene = top }
+end
+
+-- The evolution screen prints its text inside drawPanel; while the Stadium
+-- box shows it, that screen's drawPanel runs without its lines (the pic and
+-- balls unchanged). The override lives on that one screen.
+function Gen2:coverHostText(text, covered)
+  local scene = text and text.scene
+  if not scene or rawget(scene, "drawPanel") then return end
+  local EvolutionAnim = getmetatable(scene)
+  local original = EvolutionAnim and EvolutionAnim.drawPanel
+  if type(original) ~= "function" then return end
+  local cover
+  cover = function(s, ...)
+    if rawget(s, "drawPanel") ~= cover or not covered() then return original(s, ...) end
+    local lines = s.lines
+    s.lines = nil
+    local ok, err = pcall(original, s, ...)
+    s.lines = lines
+    if not ok then error(err, 0) end
+  end
+  scene.drawPanel = cover
+  self.textCovers = self.textCovers or {}
+  self.textCovers[scene] = cover
+end
+
+function Gen2:release()
+  if self.statsCover and rawget(self.screen, "drawStatsBox") == self.statsCover then
+    self.screen.drawStatsBox = nil
+  end
+  self.statsCover = nil
+  for scene, cover in pairs(self.textCovers or {}) do
+    if rawget(scene, "drawPanel") == cover then scene.drawPanel = nil end
+  end
+  self.textCovers = nil
+end
+
 function Gen2:onTop()
   local states = self.screen.game and self.screen.game.stack and self.screen.game.stack.states
   return states ~= nil and states[#states] == self.screen
@@ -209,6 +379,25 @@ function Gen2:menuContext()
   if field and (screen.messageTimer or 0) <= 0 and self:onTop() then
     return { kind = "yesno", field = field, yesIndex = screen[field],
       select = function(i) screen[field] = i end }
+  end
+  local pack = self:packMenu()
+  if pack then
+    local busy = function() return pack.message or pack.submenu or pack.switching or pack.qtyState or pack.confirm end
+    return { kind = "pack", menu = pack,
+      select = function(i)
+        if busy() then return end
+        pack.index = i
+        pcall(pack.ensureVisible, pack)
+      end,
+      current = function() return pack.index end,
+      pocket = function(delta)
+        if not busy() then pcall(pack.switchPocket, pack, delta) end
+      end,
+      submenuOpen = function() return pack.submenu ~= nil end,
+      selectSub = function(i)
+        if pack.submenu and pack.submenu.rows and pack.submenu.rows[i] then pack.submenu.index = i; return true end
+        return false
+      end }
   end
   local party = self:partyMenu()
   if party then
@@ -222,6 +411,11 @@ function Gen2:menuContext()
         end
         return false
       end }
+  end
+  -- the command bar and move diamond only while the battle has the input
+  if not self:onTop() then return nil end
+  if screen.phase == "stats-box" and screen.statsBoxMon then
+    return { kind = "stats", mon = screen.statsBoxMon }
   end
   if screen.phase == "menu" and not screen.contest and (screen.messageTimer or 0) <= 0 then
     return { kind = "command", tabs = Gen2.TABS,
@@ -343,7 +537,7 @@ function Gen2:menuView(menu)
 end
 
 function Gen2:hidesState(state, menu)
-  return menu ~= nil and menu.kind == "switch" and menu.menu == state
+  return menu ~= nil and (menu.kind == "switch" or menu.kind == "pack") and menu.menu == state
 end
 
 return Gen2

@@ -115,10 +115,26 @@ function Gen1:panel(side)
   local dex, variant
   if not self:substitute(side) then dex, variant = self:speciesOf(b.mon) end
   return { mon = b.mon, name = b.name or "", level = b.mon.level, hp = hp,
+    exp = side == "player" and self:expFraction(b.mon) or nil,
     maxHp = b.mon.stats and b.mon.stats.hp or b.mon.maxHP or hp,
     status = UI.statusKey(status, b.fainted), tag = tag,
     balls = party and UI.partyBallStates(party) or nil,
     dex = dex, variant = variant }
+end
+
+-- How far the Pokemon is from this level to the next (0..1), by its growth
+-- curve (Growth.expForLevel, as the summary screen's EXP to next level).
+-- Gen 1 has no EXP bar; the Stadium card's is an addition. Level 100: full.
+function Gen1:expFraction(mon)
+  if not (mon and tonumber(mon.exp) and tonumber(mon.level)) then return nil end
+  local def = self.battle.data and self.battle.data.pokemon and self.battle.data.pokemon[mon.species]
+  local okG, Growth = pcall(require, "src.pokemon.Growth")
+  if not (def and okG and type(Growth) == "table" and Growth.expForLevel) then return nil end
+  if mon.level >= 100 then return 1 end
+  local ok1, base = pcall(Growth.expForLevel, def.growthRate, mon.level)
+  local ok2, nextExp = pcall(Growth.expForLevel, def.growthRate, mon.level + 1)
+  if not (ok1 and ok2 and base and nextExp and nextExp > base) then return nil end
+  return math.max(0, math.min(1, (mon.exp - base) / (nextExp - base)))
 end
 
 -- The battler's front sprite, coloured as the battle colours its pics
@@ -151,18 +167,27 @@ function Gen1:panels()
   return out
 end
 
--- The host party menu this battle opened (PKMN, or a forced replacement).
+-- The host party menu this battle opened (PKMN, or a forced replacement),
+-- and the refusal box it pushed over itself if one is up (PartyMenu:refuse:
+-- "... is already out!", "There's no will to fight!").
 function Gen1:partyMenu()
   local battle = self.battle
   local states = battle.game and battle.game.stack and battle.game.stack.states
   local top = states and states[#states]
   if not top then return nil end
   local ok, PartyMenu = pcall(require, "src.ui.PartyMenu")
-  if not ok or getmetatable(top) ~= PartyMenu then return nil end
+  if not ok then return nil end
+  local text
+  if getmetatable(top) ~= PartyMenu then
+    local okT, TextBox = pcall(require, "src.render.TextBox")
+    local under = states[#states - 1]
+    if not (okT and getmetatable(top) == TextBox and under and getmetatable(under) == PartyMenu) then return nil end
+    top, text = under, top
+  end
   -- item use and plain picks drive the same cards (TM/HM and evolution
   -- stones keep the host's ABLE / NOT ABLE list)
   if top.battle ~= battle or top.tmhm or top.evoStone then return nil end
-  return top
+  return top, text
 end
 
 -- The party menu's own prompt ("Use item on which POKeMON?", ...).
@@ -174,6 +199,125 @@ end
 
 function Gen1:partyItemUse(menu)
   return menu ~= nil and menu.itemUse == true
+end
+
+-- The battle bag (the ListMenu of kind "bag" opened over this battle) and
+-- the message box it pushed over itself, if one is up (a refused item).
+function Gen1:packMenu()
+  local battle = self.battle
+  local states = battle.game and battle.game.stack and battle.game.stack.states
+  if type(states) ~= "table" then return nil end
+  local okL, ListMenu = pcall(require, "src.ui.ListMenu")
+  if not okL then return nil end
+  local function isBag(s) return type(s) == "table" and getmetatable(s) == ListMenu and s.kind == "bag" end
+  local n = #states
+  local bag, text
+  if isBag(states[n]) then bag = states[n]
+  else
+    local okT, TextBox = pcall(require, "src.render.TextBox")
+    if okT and type(states[n]) == "table" and getmetatable(states[n]) == TextBox and isBag(states[n - 1]) then
+      bag, text = states[n - 1], states[n]
+    end
+  end
+  if not bag then return nil end
+  for i = 1, n do
+    if states[i] == battle then return bag, text end
+  end
+  return nil
+end
+
+-- The Stadium item list's contents (Menu.draw's `pack` view).
+function Gen1:packView(menu)
+  local bag = menu.menu
+  local rows = {}
+  for i, item in ipairs(bag.items or {}) do
+    rows[i] = { name = item.label or "", count = item.count, cancel = item.cancel == true }
+  end
+  local okS, Strings = pcall(require, "src.core.Strings")
+  local title = bag.title or "ITEMS"
+  if okS and Strings then
+    local okT, shown = pcall(Strings, title)
+    if okT and type(shown) == "string" then title = shown end
+  end
+  local message
+  if menu.text and type(menu.text.visibleText) == "function" then
+    local okV, lines = pcall(menu.text.visibleText, menu.text)
+    message = okV and type(lines) == "table" and lines or nil
+  end
+  return { title = title, rows = rows, index = bag.index, message = message }
+end
+
+-- Host text over the battle outside its own message phases: the
+-- evolution's "is evolving" / "evolved into" / "learned" boxes (TextBox
+-- states over the battle and the EvolutionState movie, the intro's frame
+-- hold included). Returns { lines, hide = {states}, evolution = bool } for
+-- the Stadium box, or nil. A box over any other screen (the bag) is not
+-- this.
+function Gen1:hostText()
+  local battle = self.battle
+  local states = battle.game and battle.game.stack and battle.game.stack.states
+  if type(states) ~= "table" then return nil end
+  local okT, TextBox = pcall(require, "src.render.TextBox")
+  local okE, EvolutionState = pcall(require, "src.ui.EvolutionState")
+  if not okT then return nil end
+  local base
+  for i = #states, 1, -1 do
+    if states[i] == battle then base = i break end
+  end
+  if not base or base == #states then return nil end
+  local boxes, evolution, top = {}, false, nil
+  for i = base + 1, #states do
+    local s = states[i]
+    local mt = type(s) == "table" and getmetatable(s) or nil
+    if mt == TextBox then boxes[#boxes + 1] = s; top = s
+    elseif okE and mt == EvolutionState then evolution = true
+    elseif type(s) == "table" and mt == nil and i == #states and getmetatable(states[i - 1] or {}) == TextBox then
+      -- the intro's DelayFrames hold (a bare state over its box)
+    else
+      return nil
+    end
+  end
+  if not (top or evolution) then return nil end
+  local lines
+  if top and type(top.visibleText) == "function" then
+    local ok, visible = pcall(top.visibleText, top)
+    lines = ok and type(visible) == "table" and visible or nil
+  end
+  return { lines = lines or {}, hide = boxes, evolution = evolution }
+end
+
+-- The level-up stats window (BattleState.StatBox, PrintStatsBox) over this
+-- battle.
+function Gen1:statBox()
+  local battle = self.battle
+  local states = battle.game and battle.game.stack and battle.game.stack.states
+  local top = type(states) == "table" and states[#states] or nil
+  local BattleState = Gen1.module()
+  local StatBox = BattleState and BattleState.StatBox
+  if not (top and StatBox and getmetatable(top) == StatBox and top.mon) then return nil end
+  for _, state in ipairs(states) do
+    if state == battle then return top end
+  end
+  return nil
+end
+
+local function hostString(text)
+  local okS, Strings = pcall(require, "src.core.Strings")
+  if okS and Strings then
+    local ok, shown = pcall(Strings, text)
+    if ok and type(shown) == "string" then return shown end
+  end
+  return text
+end
+
+-- The stats window's rows, as PrintStatsBox lists them.
+function Gen1:statsView(menu)
+  local mon = menu.menu.mon
+  local s = mon.stats or {}
+  local def = self.battle.data and self.battle.data.pokemon and self.battle.data.pokemon[mon.species]
+  return { name = mon.nickname or (def and def.name) or "", level = mon.level,
+    rows = { { hostString("ATTACK"), s.attack }, { hostString("DEFENSE"), s.defense },
+      { hostString("SPEED"), s.speed }, { hostString("SPECIAL"), s.special } } }
 end
 
 -- The host's battle YES/NO with the default labels.
@@ -196,11 +340,11 @@ function Gen1:menuContext()
     return { kind = "yesno", menu = choice, yesIndex = choice.index,
       select = function(i) if choice.pending == nil then choice.index = i end end }
   end
-  local party = self:partyMenu()
+  local party, refusal = self:partyMenu()
   if party then
     local members = party.party or battle:playerPartyView() or {}
-    return { kind = "switch", menu = party, memberCount = #members,
-      select = function(i) party.index = i end,
+    return { kind = "switch", menu = party, text = refusal, memberCount = #members,
+      select = function(i) if not refusal then party.index = i end end,
       submenuOpen = function() return party.submenu ~= nil end,
       selectSub = function(action)
         for i, entry in ipairs(party.subItems or {}) do
@@ -209,7 +353,26 @@ function Gen1:menuContext()
         return false
       end }
   end
+  local statBox = self:statBox()
+  if statBox then return { kind = "stats", menu = statBox } end
+  local bag, text = self:packMenu()
+  if bag then
+    return { kind = "pack", menu = bag, text = text,
+      select = function(i)
+        if text or not bag.items[i] then return end
+        bag.index = i
+        -- keep the host's own window around the cursor (its 3 cursor rows)
+        local rows = bag.cursorRows or bag.rows or 3
+        if i - (bag.scroll or 0) > rows then bag.scroll = i - rows end
+        if i - (bag.scroll or 0) < 1 then bag.scroll = i - 1 end
+      end,
+      current = function() return bag.index end }
+  end
   if battle.safari or battle.demo then return nil end
+  -- the command bar and move diamond only while the battle itself has the
+  -- input (not under a screen it opened)
+  local states = battle.game and battle.game.stack and battle.game.stack.states
+  if type(states) == "table" and #states > 0 and states[#states] ~= battle then return nil end
   if battle.phase == "menu" then
     if battle.player and battle.player.mon and (battle.player.mon.hp or 0) <= 0 then return nil end
     return { kind = "command", tabs = Gen1.TABS,
@@ -297,14 +460,22 @@ end
 
 -- View fields for Menu.draw.
 function Gen1:menuView(menu)
+  local message = menu.kind == "switch" and menu.menu.message or nil
+  if menu.kind == "switch" and menu.text and type(menu.text.visibleText) == "function" then
+    local ok, lines = pcall(menu.text.visibleText, menu.text)
+    if ok and type(lines) == "table" and #lines > 0 then message = table.concat(lines, "\n") end
+  end
   return { commandIndex = self.battle.menuIndex, moveIndex = self.battle.moveIndex,
-    switchIndex = menu.kind == "switch" and menu.menu.index or nil,
-    message = menu.kind == "switch" and menu.menu.message or nil }
+    switchIndex = menu.kind == "switch" and menu.menu.index or nil, message = message }
 end
 
 -- The host states the Stadium menus stand in for.
 function Gen1:hidesState(state, menu)
-  return menu ~= nil and (menu.kind == "switch" or menu.kind == "yesno") and menu.menu == state
+  if menu == nil then return false end
+  if menu.kind == "pack" then return state == menu.menu or (menu.text ~= nil and state == menu.text) end
+  if menu.kind == "stats" then return state == menu.menu end
+  if menu.kind == "switch" and menu.text ~= nil and state == menu.text then return true end
+  return (menu.kind == "switch" or menu.kind == "yesno") and menu.menu == state
 end
 
 return Gen1
