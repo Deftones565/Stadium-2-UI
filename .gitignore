@@ -1,0 +1,5 @@
+baseroms/*
+!baseroms/.gitkeep
+*.z64
+*.n64
+*.v64
