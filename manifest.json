@@ -20,6 +20,7 @@
     "STADIUM2_IMPORTER"
   ],
   "conflicts": [],
+  "github": "Deftones565/Stadium-2-UI",
   "affects_link": false,
   "description": "Pokemon Stadium 2's battle UI for Gen 1 and Gen 2, recreated in Lua (no ROM needed). Works on its own or with STADIUM2_IMPORTER's 3D battle, which adds live portraits."
 }
