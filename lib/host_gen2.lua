@@ -1,7 +1,10 @@
 -- Gen 2 (src.ui.gen2.BattleState) data and menus for the Stadium UI, read
 -- straight from the host battle screen. Ported from STADIUM2_IMPORTER's
 -- lib/gen2_battle.lua scene methods, without its 3D scene.
-local UI = require("mods.STADIUM2_UI.lib.stadium_ui")
+-- This mod's module root ("mods.STADIUM2_UI", or wherever it is embedded,
+-- e.g. STADIUM2_IMPORTER's ui/ submodule): taken from this module's name.
+local ROOT = (...):match("^(.*)%.lib%.[^%.]+$") or "mods.STADIUM2_UI"
+local UI = require(ROOT .. ".lib.stadium_ui")
 
 local Gen2 = {}
 Gen2.__index = Gen2

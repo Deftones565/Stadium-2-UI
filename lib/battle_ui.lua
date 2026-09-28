@@ -11,12 +11,15 @@
 -- the importer's exported model renderer when it is present (optional).
 -- If the importer's own STADIUM UI option is on, this mod stands aside so
 -- the two never draw or handle input twice.
-local UI = require("mods.STADIUM2_UI.lib.stadium_ui")
-local Menu = require("mods.STADIUM2_UI.lib.stadium_menu")
-local Portrait = require("mods.STADIUM2_UI.lib.stadium_portrait")
-local SpritePortrait = require("mods.STADIUM2_UI.lib.sprite_portrait")
-local Gen1 = require("mods.STADIUM2_UI.lib.host_gen1")
-local Gen2 = require("mods.STADIUM2_UI.lib.host_gen2")
+-- This mod's module root ("mods.STADIUM2_UI", or wherever it is embedded,
+-- e.g. STADIUM2_IMPORTER's ui/ submodule): taken from this module's name.
+local ROOT = (...):match("^(.*)%.lib%.[^%.]+$") or "mods.STADIUM2_UI"
+local UI = require(ROOT .. ".lib.stadium_ui")
+local Menu = require(ROOT .. ".lib.stadium_menu")
+local Portrait = require(ROOT .. ".lib.stadium_portrait")
+local SpritePortrait = require(ROOT .. ".lib.sprite_portrait")
+local Gen1 = require(ROOT .. ".lib.host_gen1")
+local Gen2 = require(ROOT .. ".lib.host_gen2")
 
 local BattleUI = {}
 
@@ -34,6 +37,8 @@ end
 -- The importer's own integrated Stadium UI, if it is switched on.
 local deferReported
 function BattleUI.importerOwnsUi()
+  -- embedded in the importer, this IS the importer's STADIUM UI
+  if BattleUI.embedded then return false end
   local Importer = package.loaded["mods.STADIUM2_IMPORTER.lib.importer"]
   if type(Importer) ~= "table" or type(Importer.stadiumUiEnabled) ~= "function" then return false end
   local ok, on = pcall(Importer.stadiumUiEnabled)

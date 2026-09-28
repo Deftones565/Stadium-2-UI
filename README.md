@@ -64,6 +64,22 @@ menus through the host's own menu state.
 The layout, colours and menu behaviour come from the research in
 STADIUM2_IMPORTER (`docs/luna/research/stadium2-battle-ui.md`).
 
+## Embedding in another mod
+
+This repository is also the UI of STADIUM2_IMPORTER, which includes it as a
+git submodule at `ui/`, so there is one UI codebase. Modules find each other
+from their own module name, so the same files load as
+`mods.STADIUM2_UI.lib.*` or `mods.<MOD>.ui.lib.*`. A mod installs it with:
+
+```lua
+local Embed = require("mods.<MOD>.ui.lib.embed")
+Embed.install(mod, { embedded = true, assetBase = "ui/",
+  enabled = function() return ... end })  -- plus optional option readers
+```
+
+`lib/embed.lua` lists the options. This mod's `main.lua` installs through the
+same function.
+
 ## Credits
 
 The Stadium 2 UI research behind this mod builds on the work of these

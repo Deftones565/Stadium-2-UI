@@ -498,4 +498,36 @@ end
 ok(not wrapped["input.gamepad"],"input.gamepad waits for the first Stadium menu")
 ok(events["battle.ended"],"releases on battle end")
 
+-- Embedded (STADIUM2_IMPORTER's ui/ submodule): every module loads under the
+-- embedding mod's root, never back under mods.STADIUM2_UI.
+do
+  local root="mods.EMBEDDER.ui"
+  local libDir="mods/STADIUM2_UI/lib/"
+  local names={}
+  for line in io.popen('ls '..libDir):lines() do
+    local n=line:match("^(.-)%.lua$")
+    if n then names[#names+1]=n end
+  end
+  for _,n in ipairs(names) do
+    package.preload[root..".lib."..n]=function(name) return assert(loadfile(libDir..n..".lua"))(name) end
+  end
+  local before={}
+  for k in pairs(package.loaded) do before[k]=true end
+  local Embed=require(root..".lib.embed")
+  ok(Embed.ROOT==root,"embedded: the module root comes from the module name")
+  ok(Embed.BattleUI~=BattleUI,"embedded: its own UI state, apart from a standalone copy")
+  local strays={}
+  for k in pairs(package.loaded) do
+    if not before[k] and type(k)=="string" and k:find("STADIUM2_UI",1,true) then strays[#strays+1]=k end
+  end
+  ok(#strays==0,"embedded: nothing loads under mods.STADIUM2_UI ("..table.concat(strays,",")..")")
+  local ewrapped={}
+  local emod={hooks={wrap=function(_,name) ewrapped[name]=true end},events={on=function() end},
+    assets={path=function(_,p) return "PATH:"..p end}}
+  local enabledNow=false
+  Embed.install(emod,{embedded=true,assetBase="ui/",enabled=function() return enabledNow end})
+  ok(ewrapped["render.hud"] and ewrapped["battle.bottom_ui_visible"],"embedded: installs the same hooks")
+  ok(Embed.BattleUI.embedded==true and Embed.BattleUI.importerOwnsUi()==false,"embedded: never defers to its host mod")
+end
+
 print(("%d checks passed (Stadium UI host integration)"):format(checks))

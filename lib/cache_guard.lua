@@ -6,7 +6,9 @@
 -- see the real package.loaded.
 local Guard = {}
 
-local PREFIX = "mods.STADIUM2_UI."
+-- this mod's modules, wherever it is loaded from ("mods.STADIUM2_UI." or
+-- an embedding mod's "mods.X.ui.")
+local PREFIX = ((...):match("^(.*)%.lib%.[^%.]+$") or "mods.STADIUM2_UI") .. "."
 local STAMP = PREFIX .. "__build"
 local SELF = PREFIX .. "lib.cache_guard"
 

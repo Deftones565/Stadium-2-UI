@@ -17,8 +17,11 @@
 --
 -- Emulators without framebuffer emulation draw this box as noise, which is
 -- why it looked garbled in the captures.
-local Assets = require("mods.STADIUM2_UI.lib.stadium_ui_assets")
-local Renderer = require("mods.STADIUM2_UI.lib.matrix")
+-- This mod's module root ("mods.STADIUM2_UI", or wherever it is embedded,
+-- e.g. STADIUM2_IMPORTER's ui/ submodule): taken from this module's name.
+local ROOT = (...):match("^(.*)%.lib%.[^%.]+$") or "mods.STADIUM2_UI"
+local Assets = require(ROOT .. ".lib.stadium_ui_assets")
+local Renderer = require(ROOT .. ".lib.matrix")
 
 local Portrait = {}
 Portrait.SIZE = 32

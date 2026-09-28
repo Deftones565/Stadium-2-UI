@@ -12,8 +12,11 @@
 -- * ROM execution (the game's display list from save states): positions,
 --   frame piece geometry, text origin and advances.
 -- Anything not covered there is marked below.
-local Assets = require("mods.STADIUM2_UI.lib.stadium_ui_assets")
-local ButtonGlyphs = require("mods.STADIUM2_UI.lib.stadium_button_glyphs")
+-- This mod's module root ("mods.STADIUM2_UI", or wherever it is embedded,
+-- e.g. STADIUM2_IMPORTER's ui/ submodule): taken from this module's name.
+local ROOT = (...):match("^(.*)%.lib%.[^%.]+$") or "mods.STADIUM2_UI"
+local Assets = require(ROOT .. ".lib.stadium_ui_assets")
+local ButtonGlyphs = require(ROOT .. ".lib.stadium_button_glyphs")
 
 local UI = {}
 

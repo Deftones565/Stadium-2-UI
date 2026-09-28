@@ -25,9 +25,12 @@
 --
 -- Generated controller prompts are a port extension. Native N64 glyphs
 -- remain available on keyboard and through the icon preference.
-local UI = require("mods.STADIUM2_UI.lib.stadium_ui")
-local Controller = require("mods.STADIUM2_UI.lib.stadium_controller")
-local ButtonGlyphs = require("mods.STADIUM2_UI.lib.stadium_button_glyphs")
+-- This mod's module root ("mods.STADIUM2_UI", or wherever it is embedded,
+-- e.g. STADIUM2_IMPORTER's ui/ submodule): taken from this module's name.
+local ROOT = (...):match("^(.*)%.lib%.[^%.]+$") or "mods.STADIUM2_UI"
+local UI = require(ROOT .. ".lib.stadium_ui")
+local Controller = require(ROOT .. ".lib.stadium_controller")
+local ButtonGlyphs = require(ROOT .. ".lib.stadium_button_glyphs")
 
 local Menu = {}
 

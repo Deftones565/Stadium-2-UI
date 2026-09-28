@@ -7,7 +7,10 @@
 --
 -- UI DETAIL = HD enlarges every texture 4x with edge-restoring
 -- interpolation and draws it filtered; N64 PIXELS keeps the 1x pixels.
-local Font = require("mods.STADIUM2_UI.lib.pixel_font")
+-- This mod's module root ("mods.STADIUM2_UI", or wherever it is embedded,
+-- e.g. STADIUM2_IMPORTER's ui/ submodule): taken from this module's name.
+local ROOT = (...):match("^(.*)%.lib%.[^%.]+$") or "mods.STADIUM2_UI"
+local Font = require(ROOT .. ".lib.pixel_font")
 
 local Assets = {}
 
@@ -415,7 +418,7 @@ function Assets.images()
     if k > 1 then img:setFilter("linear", "linear") else img:setFilter("nearest", "nearest") end
     return img
   end
-  local Buttons = require("mods.STADIUM2_UI.lib.stadium_n64_buttons")
+  local Buttons = require(ROOT .. ".lib.stadium_n64_buttons")
   local out = { sets = {}, glyphs = {}, smallGlyphs = {}, k = k }
   for file, set in pairs(assets.sets) do
     out.sets[file] = {}
@@ -438,7 +441,8 @@ end
 -- Portrait camera records are Stadium 2 data: available only through
 -- STADIUM2_IMPORTER (which has the ROM) when it is installed.
 function Assets.portraitRecord(_, species, opponent)
-  local Importer = package.loaded["mods.STADIUM2_IMPORTER.lib.stadium_ui_assets"]
+  local Importer = package.loaded["mods.STADIUM2_IMPORTER.lib.stadium_portrait_data"]
+    or package.loaded["mods.STADIUM2_IMPORTER.lib.stadium_ui_assets"]
   if type(Importer) ~= "table" or type(Importer.load) ~= "function" then return nil end
   local ok, loaded = pcall(Importer.load)
   if not (ok and loaded) then return nil end

@@ -2,8 +2,11 @@
 -- the user; Stadium 2 only has N64 icons). The ROM's N64 textures stay in
 -- use for the N64 choice, for keyboard play under AUTO, and whenever this
 -- returns false.
-local Controller = require("mods.STADIUM2_UI.lib.stadium_controller")
-local Atlas = require("mods.STADIUM2_UI.lib.stadium_button_atlas")
+-- This mod's module root ("mods.STADIUM2_UI", or wherever it is embedded,
+-- e.g. STADIUM2_IMPORTER's ui/ submodule): taken from this module's name.
+local MOD_ROOT = (...):match("^(.*)%.lib%.[^%.]+$") or "mods.STADIUM2_UI"
+local Controller = require(MOD_ROOT .. ".lib.stadium_controller")
+local Atlas = require(MOD_ROOT .. ".lib.stadium_button_atlas")
 local Glyphs = {}
 local cached, reported = {}, {}
 local input, enabled, warn, modRef
@@ -18,7 +21,10 @@ local LABELS = {
 local PS_LABELS = { a="X", b="O", x="[]", y="/\\", start="OPT" }
 
 function Glyphs.bindWarning(fn) warn = fn end
-function Glyphs.bindMod(mod) modRef = mod end
+-- base: where this UI's files sit inside `mod` ("" standalone, "ui/" when
+-- embedded in STADIUM2_IMPORTER).
+local assetBase = ""
+function Glyphs.bindMod(mod, base) modRef, assetBase = mod, base or "" end
 function Glyphs.setStyle(style) iconStyle = style or "auto" end
 
 -- device: "pad" / "keyboard" (stadium_menu); style: the BUTTON ICONS option.
@@ -33,11 +39,11 @@ function Glyphs.setContext(game, device, style)
 end
 
 local function imageSource(file)
-  local path = ROOT .. file
+  local path = assetBase .. ROOT .. file
   if modRef and modRef.assets and type(modRef.assets.path) == "function" then
     return modRef.assets:path(path)
   end
-  return "mods/STADIUM2_UI/" .. path
+  return MOD_ROOT:gsub("%.", "/") .. "/" .. ROOT .. file
 end
 
 local function load(g, family)
