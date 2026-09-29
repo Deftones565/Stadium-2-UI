@@ -23,8 +23,8 @@ It draws over the Game Boy battle, or over STADIUM2_IMPORTER's 3D battle.
 The portrait box beside each status panel shows the Pokemon's front sprite
 (coloured as the battle colours it) in sprite battles, and Stadium's live
 3D portrait in the importer's 3D battle (its models and camera data come
-from the importer's ROM import). If the importer's own STADIUM UI option is on, this mod stands
-aside; turn that option off to use this one.
+from the importer's ROM import). STADIUM2_IMPORTER requires this mod for its
+Stadium UI.
 
 The layout fits any window or screen: it scales to the largest size where
 everything fits, pins the status panels to the screen edges, centres the
@@ -64,21 +64,12 @@ menus through the host's own menu state.
 The layout, colours and menu behaviour come from the research in
 STADIUM2_IMPORTER (`docs/luna/research/stadium2-battle-ui.md`).
 
-## Embedding in another mod
+## Used by other mods
 
-This repository is also the UI of STADIUM2_IMPORTER, which includes it as a
-git submodule at `ui/`, so there is one UI codebase. Modules find each other
-from their own module name, so the same files load as
-`mods.STADIUM2_UI.lib.*` or `mods.<MOD>.ui.lib.*`. A mod installs it with:
-
-```lua
-local Embed = require("mods.<MOD>.ui.lib.embed")
-Embed.install(mod, { embedded = true, assetBase = "ui/",
-  enabled = function() return ... end })  -- plus optional option readers
-```
-
-`lib/embed.lua` lists the options. This mod's `main.lua` installs through the
-same function.
+STADIUM2_IMPORTER lists this mod as a dependency (the game offers to install
+it). A mod that depends on it can use `mod:find("STADIUM2_UI").exports`:
+`enabled()`, `messageAvailable()`, `toLatin1(text)` and
+`drawMessage(area, lines, side, warn)` (Stadium's message box).
 
 ## Credits
 

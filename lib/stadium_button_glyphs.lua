@@ -54,9 +54,11 @@ local function load(g, family)
   local ok, err = pcall(function()
     -- Own this image. mod.assets:image() is shared by the loader and cannot
     -- be released here; assets:path() also works inside the sealed mod.
-    image = g.newImage(imageSource(spec.file), {mipmaps=true})
-    image:setFilter("linear", "linear")
-    if image.setMipmapFilter then image:setMipmapFilter("linear") end
+    -- GLES2 phones without full non-power-of-two support refuse mipmaps
+    local okI, withMips = pcall(g.newImage, imageSource(spec.file), {mipmaps=true})
+    image = okI and withMips or g.newImage(imageSource(spec.file))
+    pcall(image.setFilter, image, "linear", "linear")
+    if okI and image.setMipmapFilter then pcall(image.setMipmapFilter, image, "linear") end
     quads = {}
     local iw, ih = image:getDimensions()
     for key, r in pairs(spec.rects) do

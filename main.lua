@@ -1,10 +1,11 @@
 -- Evict this mod's modules cached by a previous version (see
 -- lib/cache_guard.lua). MOD_BUILD must match manifest.json's version
 -- (stadium2_ui_host_test).
-local MOD_BUILD = "1.0.4"
+local MOD_BUILD = "1.1.0"
 require("mods.STADIUM2_UI.lib.cache_guard").refresh(MOD_BUILD)
 
 local Embed = require("mods.STADIUM2_UI.lib.embed")
+local StadiumUI = require("mods.STADIUM2_UI.lib.stadium_ui")
 
 return function(mod)
   local function option(key, default)
@@ -50,4 +51,16 @@ return function(mod)
     controllerIcons = function() return option("stadium2_ui_controller_icons", "auto") end,
     thorMode = function() return option("stadium2_ui_thor_input_mode", "thor") end,
   })
+
+  -- For mods that depend on this one (STADIUM2_IMPORTER's in-battle
+  -- evolution shows its texts in Stadium's message box through these).
+  if mod.exports then
+    mod.exports.enabled = function() return option("stadium2_ui_enabled", true) == true end
+    mod.exports.messageAvailable = function() return StadiumUI.available() == true end
+    mod.exports.toLatin1 = StadiumUI.toLatin1
+    -- area = {x, y, w, h} in window units; lines in Latin-1; side "player" | "enemy"
+    mod.exports.drawMessage = function(area, lines, side, warnFn)
+      return StadiumUI.tryDrawMessage(area, lines, side, warnFn)
+    end
+  end
 end

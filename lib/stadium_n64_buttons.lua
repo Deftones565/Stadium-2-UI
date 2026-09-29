@@ -109,7 +109,8 @@ function Buttons.image(e, w, h)
   local g = love and love.graphics
   if not (g and (LETTER[e] or ARROW[e])) then return nil end
   local s = Buttons.SCALE
-  local canvas = g.newCanvas(w * s, h * s, { format = "rgba8", dpiscale = 1 })
+  local okC, canvas = pcall(g.newCanvas, w * s, h * s, { format = "rgba8", dpiscale = 1 })
+  if not okC then return nil, canvas end
   g.push("all")
   local ok, err = pcall(function()
     g.setCanvas(canvas)
@@ -121,18 +122,23 @@ function Buttons.image(e, w, h)
   end)
   g.pop()
   if not ok then canvas:release(); return nil, err end
-  local data = canvas:newImageData()
+  local okD, data = pcall(canvas.newImageData, canvas)
   canvas:release()
+  if not okD then return nil, data end
   -- blending onto a transparent canvas leaves colour premultiplied by
   -- alpha; undo that so antialiased edges keep their colour
-  data:mapPixel(function(_, _, r, gg, b, a)
+  pcall(data.mapPixel, data, function(_, _, r, gg, b, a)
     if a > 0 and a < 1 then return math.min(1, r / a), math.min(1, gg / a), math.min(1, b / a), a end
     return r, gg, b, a
   end)
-  local image = g.newImage(data, { mipmaps = true })
+  -- GLES2 phones without full non-power-of-two support refuse mipmaps on
+  -- these sizes: the icon is then made without them
+  local okI, image = pcall(g.newImage, data, { mipmaps = true })
+  if not okI then okI, image = pcall(g.newImage, data) end
   data:release()
-  image:setFilter("linear", "linear")
-  if image.setMipmapFilter then image:setMipmapFilter("linear") end
+  if not okI then return nil, image end
+  pcall(image.setFilter, image, "linear", "linear")
+  if image.setMipmapFilter then pcall(image.setMipmapFilter, image, "linear") end
   return image
 end
 

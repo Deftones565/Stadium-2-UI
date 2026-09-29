@@ -58,7 +58,7 @@ function SpritePortrait.render(side, sprite, pixels)
     if slot and slot.canvas and slot.canvas.release then pcall(slot.canvas.release, slot.canvas) end
     local ok, canvas = pcall(g.newCanvas, size, size, { format = "rgba8", dpiscale = 1 })
     if not ok then return nil end
-    canvas:setFilter("linear", "linear")
+    pcall(canvas.setFilter, canvas, "linear", "linear")
     slot = { canvas = canvas, size = size }
     slots[side] = slot
   end

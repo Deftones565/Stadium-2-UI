@@ -80,7 +80,8 @@ ok(releasedImages==2 and releasedQuads==24,"teardown releases each cached image 
 fail=true; Glyphs.bindWarning(function()warnings=warnings+1 end)
 Glyphs.setContext(game,"pad"); Controller.setStyle("xbox")
 Glyphs.draw(g,"A",0,0,16,17); Glyphs.draw(g,"B",0,0,16,17)
-ok(uploads==3 and warnings==1,"failed upload is reported once and not retried per button")
+-- one failed atlas: with mipmaps, then without (GLES2), then no more per button
+ok(uploads==4 and warnings==1,"failed upload is reported once and not retried per button")
 ok(prints[#prints]=="B","asset failure retains the actual button label")
 Glyphs.release(); Controller.reset()
 print(("%d checks passed (controller atlas bounds, bindings, cache, fallbacks and cleanup)"):format(checks))

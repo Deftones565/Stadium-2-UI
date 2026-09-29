@@ -406,34 +406,71 @@ function Assets.upscale(rgba, w, h, k)
 end
 
 -- LOVE images for the painted art, built once per detail level.
-local imagesBy = {}
+-- Each piece is built on its own: a piece the device refuses is left out (and
+-- tried again a few times), so one refusal never costs the whole UI.
+Assets.RETRIES = 3
+Assets.RETRY_DELAY = 2 -- seconds before trying again after nothing could be built
+local imagesBy, blockedUntil = {}, {}
+local function clock() return love and love.timer and love.timer.getTime and love.timer.getTime() or os.clock() end
+local function retryFailed(out)
+  if not out.pending or #out.pending == 0 or out.retries >= Assets.RETRIES then return end
+  out.retries = out.retries + 1
+  local still = {}
+  for _, build in ipairs(out.pending) do
+    if not build() then still[#still + 1] = build end
+  end
+  out.pending = still
+end
 function Assets.images()
-  if imagesBy[detail] then return imagesBy[detail] end
+  local cached = imagesBy[detail]
+  if cached then retryFailed(cached) return cached end
+  if blockedUntil[detail] and clock() < blockedUntil[detail] then return nil, "UI art refused by the device" end
   if not (love and love.image and love.graphics) then return nil, "LOVE graphics unavailable" end
   local assets = Assets.load()
   local k = detail == "hd" and Assets.HD_SCALE or 1
   local function image(w, h, rgba)
     if k > 1 then rgba = Assets.upscale(rgba, w, h, k) end
     local img = love.graphics.newImage(love.image.newImageData(w * k, h * k, "rgba8", rgba))
-    if k > 1 then img:setFilter("linear", "linear") else img:setFilter("nearest", "nearest") end
+    if k > 1 then pcall(img.setFilter, img, "linear", "linear") else pcall(img.setFilter, img, "nearest", "nearest") end
     return img
   end
   local Buttons = require(ROOT .. ".lib.stadium_n64_buttons")
-  local out = { sets = {}, glyphs = {}, smallGlyphs = {}, k = k }
+  local out = { sets = {}, glyphs = {}, smallGlyphs = {}, k = k, pending = {}, retries = 0, built = 0 }
+  -- build one piece now; a refused one waits in out.pending
+  local function piece(make, store)
+    local function build()
+      local ok, value = pcall(make)
+      if ok and value then store(value) out.built = out.built + 1 return true end
+      out.error = ok and "not built" or tostring(value)
+      return false
+    end
+    if not build() then out.pending[#out.pending + 1] = build end
+  end
   for file, set in pairs(assets.sets) do
-    out.sets[file] = {}
+    local images = {}
+    out.sets[file] = images
     for i, e in pairs(set) do
       if file == 30 then
-        local icon = Buttons.image(i, e.w, e.h)
-        if icon then out.sets[file][i] = { image = icon, w = e.w, h = e.h, k = Buttons.SCALE } end
+        piece(function() return Buttons.image(i, e.w, e.h) end,
+          function(icon) images[i] = { image = icon, w = e.w, h = e.h, k = Buttons.SCALE } end)
       else
-        out.sets[file][i] = { image = image(e.w, e.h, e.rgba), w = e.w, h = e.h, k = k }
+        piece(function() return image(e.w, e.h, e.rgba) end,
+          function(img) images[i] = { image = img, w = e.w, h = e.h, k = k } end)
       end
     end
   end
-  for i, rgba in pairs(assets.font.glyphs) do out.glyphs[i] = image(Assets.GLYPH_W, Assets.GLYPH_H, rgba) end
-  for i, rgba in pairs(assets.small.glyphs) do out.smallGlyphs[i] = image(Assets.GLYPH_W, Assets.SMALL_GLYPH_H, rgba) end
+  for i, rgba in pairs(assets.font.glyphs) do
+    piece(function() return image(Assets.GLYPH_W, Assets.GLYPH_H, rgba) end, function(img) out.glyphs[i] = img end)
+  end
+  for i, rgba in pairs(assets.small.glyphs) do
+    piece(function() return image(Assets.GLYPH_W, Assets.SMALL_GLYPH_H, rgba) end, function(img) out.smallGlyphs[i] = img end)
+  end
   out.font, out.small = assets.font, assets.small
+  if out.built == 0 then
+    -- nothing at all: the UI is unavailable; try again a little later
+    blockedUntil[detail] = clock() + Assets.RETRY_DELAY
+    return nil, out.error or "UI art refused by the device"
+  end
   imagesBy[detail] = out
   return out
 end

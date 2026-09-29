@@ -1,7 +1,7 @@
 {
   "id": "STADIUM2_UI",
   "name": "Pokemon Stadium 2 Battle UI",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "api": 2,
   "games": [
     "gen1",
@@ -16,9 +16,7 @@
   "game_version": ">=0.1.86 <1.0.0",
   "priority": 106,
   "dependencies": [],
-  "optional_dependencies": [
-    "STADIUM2_IMPORTER"
-  ],
+  "optional_dependencies": [],
   "conflicts": [],
   "github": "Deftones565/Stadium-2-UI",
   "affects_link": false,
