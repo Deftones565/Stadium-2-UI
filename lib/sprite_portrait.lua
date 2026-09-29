@@ -2,6 +2,9 @@
 -- (no 3D models), the portrait box shows the Pokemon's front sprite,
 -- coloured the way the host battle colours it, on the portrait grey.
 -- Rendered at the box's on-screen size so the sprite stays sharp.
+local ROOT = (...):match("^(.*)%.lib%.[^%.]+$") or "mods.STADIUM2_UI"
+local Guard = require(ROOT .. ".lib.graphics_guard")
+
 local SpritePortrait = {}
 SpritePortrait.BACKGROUND = { 74 / 255, 74 / 255, 74 / 255, 1 }
 
@@ -16,15 +19,16 @@ function SpritePortrait.contentBounds(g, image)
   local box = { 0, 0, w, h }
   local ok = pcall(function()
     local canvas = g.newCanvas(w, h, { format = "rgba8", dpiscale = 1 })
-    g.push("all")
-    g.setCanvas(canvas)
-    g.origin()
-    g.setScissor()
-    g.setShader()
-    g.clear(0, 0, 0, 0)
-    g.setColor(1, 1, 1, 1)
-    g.draw(image, 0, 0)
-    g.pop()
+    local drew, err = Guard.run(g, function()
+      g.setCanvas(canvas)
+      g.origin()
+      g.setScissor()
+      g.setShader()
+      g.clear(0, 0, 0, 0)
+      g.setColor(1, 1, 1, 1)
+      g.draw(image, 0, 0)
+    end)
+    if not drew then canvas:release() error(err, 0) end
     local data = canvas:newImageData()
     canvas:release()
     local x0, y0, x1, y1 = w, h, -1, -1
@@ -69,8 +73,7 @@ function SpritePortrait.render(side, sprite, pixels)
   local scale = size * 0.9 / math.max(b[3], b[4])
   local x = math.floor((size - b[3] * scale) / 2 - b[1] * scale)
   local y = math.floor(size - size * 0.04 - b[4] * scale - b[2] * scale)
-  g.push("all")
-  local ok, err = pcall(function()
+  local ok, err = Guard.run(g, function()
     g.setCanvas(slot.canvas)
     g.origin()
     g.setScissor()
@@ -82,7 +85,6 @@ function SpritePortrait.render(side, sprite, pixels)
     if type(sprite.draw) == "function" then sprite.draw(drawImage) else drawImage() end
     if filter and image.setFilter then image:setFilter(filter[1], filter[2]) end
   end)
-  g.pop()
   if not ok then return nil, err end
   return slot.canvas
 end

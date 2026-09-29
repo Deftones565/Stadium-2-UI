@@ -7,6 +7,8 @@
 -- the game's own tints (A blue, B green, Start red, C yellow) still apply.
 -- File 30 entries: 0 A, 1 B, 2 C-down, 3 C-left, 4 C-right, 5 C-up, 6 L,
 -- 7 R, 8 Start; round icons are 16x18, L/R 24x17 (the ROM sizes).
+local ROOT = (...):match("^(.*)%.lib%.[^%.]+$") or "mods.STADIUM2_UI"
+local Guard = require(ROOT .. ".lib.graphics_guard")
 local Buttons = {}
 Buttons.SCALE = 16
 
@@ -111,8 +113,7 @@ function Buttons.image(e, w, h)
   local s = Buttons.SCALE
   local okC, canvas = pcall(g.newCanvas, w * s, h * s, { format = "rgba8", dpiscale = 1 })
   if not okC then return nil, canvas end
-  g.push("all")
-  local ok, err = pcall(function()
+  local ok, err = Guard.run(g, function()
     g.setCanvas(canvas)
     g.origin()
     g.setScissor()
@@ -120,7 +121,6 @@ function Buttons.image(e, w, h)
     g.setBlendMode("alpha", "alphamultiply")
     paint(g, e, w, h, s)
   end)
-  g.pop()
   if not ok then canvas:release(); return nil, err end
   local okD, data = pcall(canvas.newImageData, canvas)
   canvas:release()

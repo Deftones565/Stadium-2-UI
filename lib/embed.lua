@@ -18,6 +18,7 @@ local Menu = require(ROOT .. ".lib.stadium_menu")
 local Controller = require(ROOT .. ".lib.stadium_controller")
 local Glyphs = require(ROOT .. ".lib.stadium_button_glyphs")
 local Assets = require(ROOT .. ".lib.stadium_ui_assets")
+local Guard = require(ROOT .. ".lib.graphics_guard")
 
 local Embed = {}
 Embed.ROOT = ROOT
@@ -79,7 +80,11 @@ function Embed.install(mod, cfg)
   -- Drawn over the finished frame (and over STADIUM2_IMPORTER's 3D battle).
   mod.hooks:wrap("render.hud", function(next, game, viewport, ...)
     local result = next(game, viewport, ...)
+    local g = love and love.graphics
+    local depth = g and Guard.depth(g)
     local ok, err = pcall(BattleUI.draw, game, viewport)
+    -- never hand the engine a deeper graphics stack than it gave us
+    if g then Guard.unwind(g, depth) end
     if not ok then warn("Stadium UI draw failed: " .. tostring(err)) end
     return result
   end, 110)

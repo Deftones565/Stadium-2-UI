@@ -16,6 +16,8 @@
 -- A 1x144 image carries the line table to one shader pass over a canvas the
 -- UI is drawn into. With no effect in force begin() returns false and the UI
 -- draws straight to the screen, as without this module.
+local ROOT = (...):match("^(.*)%.lib%.[^%.]+$") or "mods.STADIUM2_UI"
+local Guard = require(ROOT .. ".lib.graphics_guard")
 local Effects = {}
 
 Effects.IDENTITY = 0xe4 -- dc 3, 2, 1, 0
@@ -162,8 +164,7 @@ function Effects.finish()
   local g = love.graphics
   local d, vp, s = frame.d, frame.viewport, frame.scale
   g.setCanvas(frame.previous)
-  g.push("all")
-  local ok, err = pcall(function()
+  local ok, err = Guard.run(g, function()
     g.origin()
     g.setScissor()
     local sh = state.shader
@@ -181,7 +182,6 @@ function Effects.finish()
     g.setBlendMode("alpha", "premultiplied")
     g.draw(state.canvas, 0, 0)
   end)
-  g.pop()
   if not ok then
     -- never lose the UI to the effects: show it plain, and stop using them
     state.failed = true

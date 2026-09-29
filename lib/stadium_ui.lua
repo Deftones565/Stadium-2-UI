@@ -17,6 +17,7 @@
 local ROOT = (...):match("^(.*)%.lib%.[^%.]+$") or "mods.STADIUM2_UI"
 local Assets = require(ROOT .. ".lib.stadium_ui_assets")
 local ButtonGlyphs = require(ROOT .. ".lib.stadium_button_glyphs")
+local Guard = require(ROOT .. ".lib.graphics_guard")
 
 local UI = {}
 
@@ -323,13 +324,11 @@ end
 -- plate. rect is in screen pixels; k = screen pixels per Stadium pixel.
 function UI.backing(rect, k, side)
   if not (rect and k and k > 0) then return false end
-  g.push("all")
-  local ok = pcall(function()
+  local ok = Guard.run(g, function()
     g.translate(rect[1], rect[2])
     g.scale(k, k)
     UI.card(0, 0, rect[3] / k, rect[4] / k, (UI.TINT[side or "player"] or UI.TINT.player).card)
   end)
-  g.pop()
   return ok
 end
 
@@ -380,8 +379,7 @@ end
 -- The message box at an explicit window rectangle (window units), drawn at
 -- UI scale `k` so its frame and text match the rest of the UI.
 function UI.tryDrawMessageAt(rect, k, lines, side, warn)
-  g.push("all")
-  local ok, err = pcall(function()
+  local ok, err = Guard.run(g, function()
     local converted = {}
     for i, line in ipairs(lines or {}) do converted[i] = UI.toLatin1(line) end
     g.translate(rect.x, rect.y)
@@ -389,7 +387,6 @@ function UI.tryDrawMessageAt(rect, k, lines, side, warn)
     UI.messageBox(converted, side, { x = 0, y = 0, w = rect.w / k, h = rect.h / k,
       textX = UI.MESSAGE.textX - UI.MESSAGE.x, textY = UI.MESSAGE.textY - UI.MESSAGE.y })
   end)
-  g.pop()
   if not ok and not reported then
     reported = true
     if type(warn) == "function" then pcall(warn, "Stadium UI message draw failed: " .. tostring(err)) end
@@ -483,9 +480,7 @@ end
 -- once) lets the caller fall back to its glass HUD.
 local reported
 function UI.tryDrawPanels(area, panels, warn, messageLayout)
-  g.push("all")
-  local ok, err = pcall(UI.drawPanels, area, panels, messageLayout)
-  g.pop()
+  local ok, err = Guard.run(g, UI.drawPanels, area, panels, messageLayout)
   if not ok and not reported then
     reported = true
     if type(warn) == "function" then pcall(warn, "Stadium UI draw failed: " .. tostring(err)) end
@@ -540,9 +535,7 @@ function UI.drawMessage(area, lines, side)
 end
 
 function UI.tryDrawMessage(area, lines, side, warn)
-  g.push("all")
-  local ok, err = pcall(UI.drawMessage, area, lines, side)
-  g.pop()
+  local ok, err = Guard.run(g, UI.drawMessage, area, lines, side)
   if not ok and not reported then
     reported = true
     if type(warn) == "function" then pcall(warn, "Stadium UI message draw failed: " .. tostring(err)) end
@@ -1147,9 +1140,7 @@ end
 
 function UI.tryDrawMenu(area, fn, warn)
   UI.clearHits()
-  g.push("all")
-  local ok, err = pcall(UI.drawMenu, area, fn)
-  g.pop()
+  local ok, err = Guard.run(g, UI.drawMenu, area, fn)
   if not ok and not reported then
     reported = true
     if type(warn) == "function" then pcall(warn, "Stadium UI menu draw failed: " .. tostring(err)) end

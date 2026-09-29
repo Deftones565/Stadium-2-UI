@@ -21,6 +21,7 @@
 -- e.g. STADIUM2_IMPORTER's ui/ submodule): taken from this module's name.
 local ROOT = (...):match("^(.*)%.lib%.[^%.]+$") or "mods.STADIUM2_UI"
 local Assets = require(ROOT .. ".lib.stadium_ui_assets")
+local Guard = require(ROOT .. ".lib.graphics_guard")
 local Renderer = require(ROOT .. ".lib.matrix")
 
 local Portrait = {}
@@ -132,8 +133,7 @@ function Portrait.render(side, opts)
     Renderer.perspective(math.rad(Portrait.FOV), 1, Portrait.NEAR, Portrait.FAR))
   local vp = Renderer.matMul(projection, view)
   local light = opts.light or {}
-  g.push("all")
-  local ok, err = pcall(function()
+  local ok, err = Guard.run(g, function()
     g.setCanvas(depth and { canvas, depthstencil = depth } or { canvas, depth = true })
     g.origin()
     g.setScissor()
@@ -150,7 +150,6 @@ function Portrait.render(side, opts)
       })
     end
   end)
-  g.pop()
   if not ok then return nil, err end
   return canvas
 end

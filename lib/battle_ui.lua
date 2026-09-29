@@ -15,6 +15,7 @@
 -- e.g. STADIUM2_IMPORTER's ui/ submodule): taken from this module's name.
 local ROOT = (...):match("^(.*)%.lib%.[^%.]+$") or "mods.STADIUM2_UI"
 local UI = require(ROOT .. ".lib.stadium_ui")
+local Guard = require(ROOT .. ".lib.graphics_guard")
 local Menu = require(ROOT .. ".lib.stadium_menu")
 local Portrait = require(ROOT .. ".lib.stadium_portrait")
 local SpritePortrait = require(ROOT .. ".lib.sprite_portrait")
@@ -214,11 +215,35 @@ local function safeRect()
   return { x = x, y = y, w = w, h = h }
 end
 
+-- The game's playfield inside the window, or nil when it is the whole window.
+-- With a touch skin the game draws only inside the skin's screen cutout
+-- (Playfield.cutout -> viewport.viewX/viewY/viewWidth/viewHeight), and
+-- TouchControls:drawSkin paints the skin's art over the rest of the window
+-- after render.hud: a UI laid out on the whole window is hidden under it.
+function BattleUI.playfield(viewport)
+  local w, h = tonumber(viewport.viewWidth), tonumber(viewport.viewHeight)
+  if not (w and h and w > 0 and h > 0) then return nil end
+  local x, y = tonumber(viewport.viewX) or 0, tonumber(viewport.viewY) or 0
+  local ww, wh = viewport.width or 0, viewport.height or 0
+  if x <= 0.5 and y <= 0.5 and w >= ww - 0.5 and h >= wh - 0.5 then return nil end
+  return { x = x, y = y, w = w, h = h }
+end
+
 local function areaFor(viewport)
+  local field = BattleUI.playfield(viewport)
+  if field then
+    -- the skin's own art holds the controls: lay out in the cutout alone
+    local inner = { width = field.w, height = field.h,
+      gameX = (viewport.gameX or field.x) - field.x, gameY = (viewport.gameY or field.y) - field.y,
+      gameWidth = viewport.gameWidth, gameHeight = viewport.gameHeight }
+    local a = BattleUI.areaFor(inner)
+    return { x = a.x + field.x, y = a.y + field.y, w = a.w, h = a.h }
+  end
   local w, h = viewport.width or 0, viewport.height or 0
   if w >= h then return BattleUI.areaFor(viewport) end
   return BattleUI.areaFor(viewport, BattleUI.touchControlsTop(h), safeRect())
 end
+BattleUI.layoutArea = areaFor
 
 -- The importer's 3D battle is on screen (its models stand in the arena).
 local function modelBattle()
@@ -844,7 +869,11 @@ function BattleUI.draw(game, viewport)
     local okB, began = pcall(function() return Effects.begin(screenEffects(a), viewport, enemyPanelRect) end)
     through = okB and began
   end
+  local g = love and love.graphics
+  local depth = g and Guard.depth(g)
   local ok, result = pcall(drawBody, game, viewport)
+  -- a draw that failed part-way leaves no transform levels behind
+  if not ok and g then Guard.unwind(g, depth) end
   if through then
     local okF, err = pcall(Effects.finish)
     if not okF then warn("screen effects failed: " .. tostring(err)) end
