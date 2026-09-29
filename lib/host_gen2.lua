@@ -566,4 +566,38 @@ function Gen2:hidesState(state, menu)
   return menu ~= nil and (menu.kind == "switch" or menu.kind == "pack") and menu.menu == state
 end
 
+-- The engine's full-screen effects this frame, as lib/screen_effects.lua
+-- describes a screen: Gold's BG effect registers (hSCX/hSCY, wBGP and the
+-- per-scanline overrides), read through the host's own BattleAnimView so the
+-- rows are exactly the ones it draws.
+function Gen2:screenEffects()
+  local runner = self.screen and self.screen.anim
+  local bg = runner and runner.bg
+  if type(bg) ~= "table" then return nil end
+  local okV, View = pcall(require, "src.ui.gen2.BattleAnimView")
+  if not (okV and type(View) == "table") then return nil end
+  local function signed(v) v = (v or 0) % 256 return v < 0x80 and v or v - 256 end
+  local d = { dx = -signed(bg.scx), dy = 0, pal = bg.bgp, elements = {} }
+  -- hSCY moves every row; the per-scanline result below already includes it
+  local scy = signed(bg.scy)
+  local lines = {}
+  for row = 0, 143 do lines[row] = { dx = 0, dy = scy } end
+  local any = scy ~= 0
+  if bg.lcdc and bg.lcdc ~= "BGP" and type(View.scanlines) == "function" then
+    for _, line in ipairs(View.scanlines(bg)) do
+      local l = lines[line.dest]
+      if l then l.dx, l.dy = line.dx or 0, (line.src or line.dest) - line.dest end
+      any = true
+    end
+  end
+  if bg.lcdc == "BGP" and type(View.bgpBands) == "function" then
+    for _, band in ipairs(View.bgpBands(bg)) do
+      for _, row in ipairs(band.rows) do lines[row].pal = band.byte end
+    end
+    any = true
+  end
+  if any then d.lines = lines end
+  return d
+end
+
 return Gen2

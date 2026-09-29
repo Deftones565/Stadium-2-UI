@@ -18,6 +18,9 @@ fonts are painted in code, following the look of the original.
   the level-up stats card, and an EXP bar inside your Pokemon's card
 - The game's own texts around a battle (evolution, refusals such as
   "already out!") in Stadium's message box
+- On the Game Boy battle, the game's full-screen effects (flashes, dark
+  screen, shakes, Night Shade's wave, the fades) act on this UI too, as they
+  act on the whole Game Boy screen (an addition; Stadium 2 has none)
 
 It draws over the Game Boy battle, or over STADIUM2_IMPORTER's 3D battle.
 The portrait box beside each status panel shows the Pokemon's front sprite

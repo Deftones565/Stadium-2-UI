@@ -20,6 +20,7 @@ local Portrait = require(ROOT .. ".lib.stadium_portrait")
 local SpritePortrait = require(ROOT .. ".lib.sprite_portrait")
 local Gen1 = require(ROOT .. ".lib.host_gen1")
 local Gen2 = require(ROOT .. ".lib.host_gen2")
+local Effects = require(ROOT .. ".lib.screen_effects")
 
 local BattleUI = {}
 
@@ -696,7 +697,8 @@ function BattleUI.drawing(a)
   return adapter == a and BattleUI.active() and now() - lastDraw < 0.25
 end
 
-function BattleUI.draw(game, viewport)
+local enemyPanelRect -- where the opponent's card was drawn last (screen effects)
+local function drawBody(game, viewport)
   local a = BattleUI.adapterFor(game)
   if not (a and viewport and BattleUI.active()) then return false end
   lastDraw = now()
@@ -801,6 +803,8 @@ function BattleUI.draw(game, viewport)
       end
     end
   end
+  enemyPanelRect = panels and panels.enemy
+    and UI.enemyColumnRect(area, panels.enemy.shiftY or 0, panels.enemy.compact) or nil
   if panels and panels.player and panels.player.exp and a.battle then
     local dt = love.timer and love.timer.getDelta and love.timer.getDelta() or 1 / 60
     panels.player.exp = BattleUI.expGlide(panels.player.mon, panels.player.level, panels.player.exp, dt)
@@ -883,7 +887,9 @@ function BattleUI.draw(game, viewport)
     if glide.player[1] ~= 0 or glide.player[2] ~= 0 then
       moves[#moves + 1] = { box = gameRect.playerBox, dx = glide.player[1], dy = glide.player[2] }
     end
-    if #moves > 0 then drawMoved(a, gameRect, moves) end
+    -- the moved boxes are copies of the already affected Game Boy frame:
+    -- straight to the screen, not through the screen effects again
+    if #moves > 0 then Effects.direct(function() drawMoved(a, gameRect, moves) end) end
   end
   captured = nil
   if boxLines then drawBox(boxLines, "player") end
@@ -914,12 +920,44 @@ function BattleUI.draw(game, viewport)
   return true
 end
 
+-- The engine's full-screen effects this frame (normal battle scene only: the
+-- importer's 3D battle has Stadium's own), or nil. PORT ADDITION.
+local function screenEffects(a)
+  if not (a and type(a.screenEffects) == "function") then return nil end
+  if BattleUI.sceneModded(a.battle or a.screen) then return nil end
+  local ok, d = pcall(a.screenEffects, a)
+  d = ok and type(d) == "table" and d or {}
+  -- the host's own veil (battle-entry flash, fade from white) is painted
+  -- under the UI; the UI takes it too, the stronger of it and the battle's
+  local veil = Effects.hostVeil()
+  if veil and (veil[4] or 0) > ((d.veil and d.veil[4]) or 0) then d.veil = veil end
+  return d
+end
+
+function BattleUI.draw(game, viewport)
+  local a = BattleUI.adapterFor(game)
+  local through = false
+  if a and viewport and BattleUI.active() then
+    local okB, began = pcall(function() return Effects.begin(screenEffects(a), viewport, enemyPanelRect) end)
+    through = okB and began
+  end
+  local ok, result = pcall(drawBody, game, viewport)
+  if through then
+    local okF, err = pcall(Effects.finish)
+    if not okF then warn("screen effects failed: " .. tostring(err)) end
+  end
+  if not ok then error(result, 0) end
+  return result
+end
+
 function BattleUI.release()
   if adapter and type(adapter.release) == "function" then pcall(adapter.release, adapter) end
   glide = { enemy = { 0, 0 }, player = { 0, 0 } }
   held = nil
   expShown = nil
   captured = nil
+  enemyPanelRect = nil
+  Effects.release()
   Portrait.release()
   SpritePortrait.release()
   adapter, deferReported = nil, nil

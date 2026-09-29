@@ -509,4 +509,39 @@ function Gen1:hidesState(state, menu)
   return (menu.kind == "switch" or menu.kind == "yesno") and menu.menu == state
 end
 
+-- The engine's full-screen effects this frame, as lib/screen_effects.lua
+-- describes a screen (read only; BattleState.drawClassic applies the same
+-- state to the Game Boy picture).
+-- AnimationWavyScreen's per-scanline SCX offsets (pokered
+-- engine/battle/animations.asm WavyScreenLineOffsets; BattleState.applyWavy).
+Gen1.WAVY_OFFSETS = { 0, 0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 2, 2, 1, 1, 1,
+  0, 0, 0, 0, 0, -1, -1, -1, -2, -2, -2, -2, -2, -1, -1, -1 }
+function Gen1:screenEffects()
+  local b = self.battle
+  local fx = b.fx
+  if not fx then return nil end
+  local d = { elements = {} }
+  -- window shakes, and the animations-off fallback alternation
+  local sx, sy = fx.shakeX or 0, fx.shakeY or 0
+  if sx == 0 and sy == 0 and fx.shake and fx.shake > 0 then
+    sx = (b.frame or 0) % 4 < 2 and 2 or -2
+  end
+  d.dx, d.dy = sx, sy
+  -- the shade map in force (a running flash wins over the persistent one)
+  local okMap, map = pcall(b.activeBgp, b)
+  d.pal = okMap and map and require(ROOT .. ".lib.screen_effects").byte(map) or nil
+  if fx.wavy then
+    local lines, phase = {}, fx.wavy.phase or 0
+    for row = 0, 143 do
+      lines[row] = { dx = Gen1.WAVY_OFFSETS[(row * 2 + phase) % 32 + 1], dy = 0 }
+    end
+    d.lines = lines
+  end
+  -- AnimationShakeEnemyHUD moves just the enemy status box
+  d.elements.enemyHud = fx.hudShakeX or 0
+  -- the white flicker of flash moves without the subanimation player
+  if fx.flash and fx.flash > 0 and (b.frame or 0) % 4 < 2 then d.veil = { 1, 1, 1, 0.85 } end
+  return d
+end
+
 return Gen1
