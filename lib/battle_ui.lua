@@ -21,6 +21,7 @@ local SpritePortrait = require(ROOT .. ".lib.sprite_portrait")
 local Gen1 = require(ROOT .. ".lib.host_gen1")
 local Gen2 = require(ROOT .. ".lib.host_gen2")
 local Effects = require(ROOT .. ".lib.screen_effects")
+local Offsets = require(ROOT .. ".lib.sprite_offsets")
 
 local BattleUI = {}
 
@@ -249,7 +250,11 @@ function BattleUI.sceneModded(state)
   if type(state) ~= "table" then return false end
   local importerScene
   for _, name in ipairs(DRAW_METHODS) do
-    local source = sourceOf(state[name])
+    local fn = state[name]
+    -- this UI's own draw-time sprite offsets are not a modded scene: look
+    -- at the engine's method (or another mod's) underneath them
+    if Offsets.isOwn(fn) then fn = Offsets.classMethod(state, name) end
+    local source = sourceOf(fn)
     if source and not source:match("^@?src/") then
       local modded
       if source:find("STADIUM2_IMPORTER", 1, true) then
@@ -546,104 +551,6 @@ local function ease(cur, target, dt)
   if math.abs(cur[2] - target[2]) < 0.05 then cur[2] = target[2] end
 end
 
-local function paper(a)
-  local okP, PaletteFX = pcall(require, "src.render.PaletteFX")
-  if okP and PaletteFX.paperShade then
-    local game = a:game()
-    local ok, r, gg, b = pcall(PaletteFX.paperShade, game and game.data)
-    if ok and r then return r, gg, b end
-  end
-  return 1, 1, 1
-end
-
--- Gen 1's paper as this frame shows it: a white picture put through the
--- battle's own zone pass (BattleState:drawZonePass), so a full-screen palette
--- effect (Night Shade's flash, a dark screen) colours the cover the way it
--- colours the field around it. nil when the host cannot (no colour pipeline).
-local paperSrc, paperCanvas
-local function paperPicture(a)
-  local battle = a.battle
-  if not (battle and type(battle.drawZonePass) == "function"
-      and type(battle.colorMode) == "function") then return nil end
-  local okC, colour = pcall(battle.colorMode, battle)
-  if not (okC and colour) then return nil end
-  local g = love.graphics
-  if not paperSrc then
-    local okP = pcall(function()
-      local data = love.image.newImageData(160, 144)
-      data:mapPixel(function() return 1, 1, 1, 1 end)
-      local src = g.newImage(data)
-      local canvas = g.newCanvas(160, 144)
-      pcall(canvas.setFilter, canvas, "nearest", "nearest")
-      paperSrc, paperCanvas = src, canvas
-    end)
-    if not okP then return nil end
-  end
-  local prev = g.getCanvas()
-  g.push()
-  g.origin()
-  g.setCanvas(paperCanvas)
-  g.clear(1, 1, 1, 1)
-  local ok = pcall(battle.drawZonePass, battle, paperSrc, 0, 0)
-  g.setCanvas(prev)
-  g.pop()
-  g.setShader()
-  g.setScissor()
-  return ok and paperCanvas or nil
-end
-
--- Cover the boxes and draw them moved (this frame's captured picture).
-local function drawMoved(a, game, moves)
-  local frame = captured
-  if not frame then return end
-  local g = love.graphics
-  local ctx = frame.ctx
-  g.push("all")
-  local ok, err = pcall(function()
-    g.setShader()
-    g.setScissor()
-    local gen2 = ctx.generation == 2 and ctx.sceneCanvas
-    local scene = gen2 and ctx.sceneCanvas
-    local sw, sh
-    if gen2 then sw, sh = scene:getDimensions() end
-    local paperPic = not gen2 and paperPicture(a) or nil
-    -- the backgrounds first, then the moved boxes (a box may move over the
-    -- other's old place)
-    for _, m in ipairs(moves) do
-      local from = boxRect(game, m.box, 0, 0)
-      if gen2 then
-        -- Gold's paper: the blank top-left corner of its own frame
-        local q = g.newQuad(ctx.ox + 1 * ctx.scale, ctx.oy + 1 * ctx.scale, 1, 1, sw, sh)
-        g.setColor(1, 1, 1, 1)
-        g.draw(scene, q, from.x, from.y, 0, from.w, from.h)
-        q:release()
-      elseif paperPic then
-        g.setColor(1, 1, 1, 1)
-        frame.renderer:blitCanvas(paperPic, game.s, game.s, ctx.zones, game.s, game.s,
-          game.x, game.y, from.x, from.y, from.w, from.h, ctx.dpiX, ctx.dpiY)
-      else
-        g.setColor(paper(a))
-        g.rectangle("fill", from.x, from.y, from.w, from.h)
-      end
-    end
-    g.setColor(1, 1, 1, 1)
-    for _, m in ipairs(moves) do
-      local to = boxRect(game, m.box, m.dx, m.dy)
-      if gen2 then
-        local s = ctx.scale
-        local q = g.newQuad(ctx.ox + m.box[1] * s, ctx.oy + m.box[2] * s, m.box[3] * s, m.box[4] * s, sw, sh)
-        g.draw(scene, q, to.x, to.y, 0, game.s / s, game.s / s)
-        q:release()
-      else
-        frame.renderer:blitCanvas(ctx.uiCanvas, game.s, game.s, ctx.zones, game.s, game.s,
-          game.x + m.dx * game.s, game.y + m.dy * game.s, to.x, to.y, to.w, to.h, ctx.dpiX, ctx.dpiY)
-      end
-    end
-  end)
-  g.pop()
-  if not ok then warn("sprite move failed: " .. tostring(err)) end
-end
-
 -- The engine scene this frame (the host's own classic scene, no world
 -- backdrop, and render.compose delivered its picture).
 local function spritesMovable(a)
@@ -880,16 +787,12 @@ local function drawBody(game, viewport)
     local dt = love.timer and love.timer.getDelta and love.timer.getDelta() or 1 / 60
     ease(glide.enemy, enemyTarget, dt)
     ease(glide.player, playerTarget, dt)
-    local moves = {}
-    if glide.enemy[1] ~= 0 or glide.enemy[2] ~= 0 then
-      moves[#moves + 1] = { box = gameRect.enemyBox, dx = glide.enemy[1], dy = glide.enemy[2] }
-    end
-    if glide.player[1] ~= 0 or glide.player[2] ~= 0 then
-      moves[#moves + 1] = { box = gameRect.playerBox, dx = glide.player[1], dy = glide.player[2] }
-    end
-    -- the moved boxes are copies of the already affected Game Boy frame:
-    -- straight to the screen, not through the screen effects again
-    if #moves > 0 then Effects.direct(function() drawMoved(a, gameRect, moves) end) end
+    -- moved where the engine draws them (lib/sprite_offsets.lua), so its
+    -- effects are drawn over the moved Pokemon, whole
+    Offsets.install(a, function() return BattleUI.drawing(a) end)
+    Offsets.set(glide.enemy, glide.player, { enemy = gameRect.enemyBox, player = gameRect.playerBox })
+  else
+    Offsets.set(nil, nil)
   end
   captured = nil
   if boxLines then drawBox(boxLines, "player") end
@@ -957,6 +860,7 @@ function BattleUI.release()
   expShown = nil
   captured = nil
   enemyPanelRect = nil
+  Offsets.release()
   Effects.release()
   Portrait.release()
   SpritePortrait.release()
