@@ -19,6 +19,7 @@ local Controller = require(ROOT .. ".lib.stadium_controller")
 local Glyphs = require(ROOT .. ".lib.stadium_button_glyphs")
 local Assets = require(ROOT .. ".lib.stadium_ui_assets")
 local Guard = require(ROOT .. ".lib.graphics_guard")
+local FrameViewport = require(ROOT .. ".lib.frame_viewport")
 
 local Embed = {}
 Embed.ROOT = ROOT
@@ -82,7 +83,7 @@ function Embed.install(mod, cfg)
     local result = next(game, viewport, ...)
     local g = love and love.graphics
     local depth = g and Guard.depth(g)
-    local ok, err = pcall(BattleUI.draw, game, viewport)
+    local ok, err = pcall(BattleUI.draw, game, FrameViewport.resolve(game, viewport, warn))
     -- never hand the engine a deeper graphics stack than it gave us
     if g then Guard.unwind(g, depth) end
     if not ok then warn("Stadium UI draw failed: " .. tostring(err)) end
